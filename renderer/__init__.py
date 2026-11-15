@@ -1,0 +1,1 @@
+"""ClipForge media processing adapters."""
