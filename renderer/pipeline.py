@@ -6,12 +6,16 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 from fractions import Fraction
 from typing import Any, Callable
 
 class PipelineError(RuntimeError):
     pass
+
+
+_REMOTION_LOCK = threading.Lock()
 
 
 def probe_media(media_path: str | Path) -> dict[str, Any]:
@@ -143,32 +147,38 @@ def _active_ratio(start: float, end: float, ranges: list[tuple[float, float]]) -
 
 def _render_with_remotion(source: Path, output: Path, duration: float,
                           captions: list[dict[str, Any]]) -> Path:
-    project = Path(__file__).resolve().parents[1] / "remotion"
-    package = project / "node_modules" / ".bin" / "remotion"
-    if not package.is_file():
-        raise PipelineError("Remotion dependencies are not installed in the container")
-    public_dir = project / "public"
-    public_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, public_dir / "clip.mp4")
-    props_path = project / "clipforge-props.json"
-    props_path.write_text(json.dumps({"durationSeconds": duration, "captions": captions}),
-                          encoding="utf-8")
-    render_dir = project / "out"
-    render_dir.mkdir(parents=True, exist_ok=True)
-    rendered = render_dir / "clipforge.mp4"
-    proc = subprocess.run(
-        [str(package), "render", "src/index.ts", "ClipForge", str(rendered),
-         f"--props={props_path}", "--codec=h264", "--concurrency=2"],
-        cwd=project, capture_output=True, text=True, timeout=3600,
-    )
-    if proc.returncode != 0 or not rendered.is_file() or rendered.stat().st_size == 0:
-        raise PipelineError("Remotion render failed: " + (proc.stderr or proc.stdout)[-2500:])
-    output.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(rendered), str(output))
-    (public_dir / "clip.mp4").unlink(missing_ok=True)
-    props_path.unlink(missing_ok=True)
-    return output
-
+    # Remotion's public/clip.mp4, props file and output path are shared by all workers.
+    with _REMOTION_LOCK:
+        project = Path(__file__).resolve().parents[1] / "remotion"
+        package = project / "node_modules" / ".bin" / "remotion"
+        if not package.is_file():
+            raise PipelineError("Remotion dependencies are not installed in the container")
+        public_dir = project / "public"
+        public_dir.mkdir(parents=True, exist_ok=True)
+        public_media = public_dir / "clip.mp4"
+        props_path = project / "clipforge-props.json"
+        render_dir = project / "out"
+        render_dir.mkdir(parents=True, exist_ok=True)
+        rendered = render_dir / "clipforge.mp4"
+        try:
+            shutil.copy2(source, public_media)
+            props_path.write_text(json.dumps({"durationSeconds": duration, "captions": captions}),
+                                  encoding="utf-8")
+            rendered.unlink(missing_ok=True)
+            proc = subprocess.run(
+                [str(package), "render", "src/index.ts", "ClipForge", str(rendered),
+                 f"--props={props_path}", "--codec=h264", "--concurrency=2", "--overwrite"],
+                cwd=project, capture_output=True, text=True, timeout=3600,
+            )
+            if proc.returncode != 0 or not rendered.is_file() or rendered.stat().st_size == 0:
+                raise PipelineError("Remotion render failed: " + (proc.stderr or proc.stdout)[-2500:])
+            output.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(rendered), str(output))
+            return output
+        finally:
+            public_media.unlink(missing_ok=True)
+            props_path.unlink(missing_ok=True)
+            rendered.unlink(missing_ok=True)
 
 def _rank_candidates(segments: list[dict[str, Any]], scenes: list[float],
                      duration: float, active_ranges: list[tuple[float, float]] | None = None) -> list[dict[str, Any]]:
@@ -257,6 +267,7 @@ def analyze_and_extract(source: Path, output_dir: Path, media: dict[str, Any],
                                      candidate.get("captions", []))
         raw_path.unlink(missing_ok=True)
         results.append({**candidate, "name": name, "path": str(path),
-                        "scene_detection": "PySceneDetect", "silence_analysis": "Auto-Editor"})
+                        "scene_detection": "PySceneDetect",
+                        "silence_analysis": "Auto-Editor" if active_ranges else "no_ranges_or_unavailable"})
         progress(72 + int(18 * index / len(candidates)), f"Rendering clip {index}/{len(candidates)} with FFmpeg")
     return results
