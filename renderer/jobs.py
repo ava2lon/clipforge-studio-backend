@@ -1,8 +1,4 @@
-"""In-process job runner for a single-container Space deployment.
-
-The registry is intentionally isolated. Multi-replica and restart-safe operation requires
-a durable queue plus shared artifact storage before production traffic is enabled.
-"""
+"""Persistent job runner for a single-container Space deployment."""
 from __future__ import annotations
 
 import json
@@ -16,47 +12,51 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
+from renderer.job_store import JobStore
 from renderer.pipeline import PipelineError, analyze_and_extract, probe_media
 
 _MAX_WORKERS = max(1, int(os.getenv("CLIPFORGE_MAX_WORKERS", "1")))
+_MAX_ACTIVE_JOBS = _MAX_WORKERS * 3
 _MAX_DOWNLOAD_BYTES = int(os.getenv("CLIPFORGE_MAX_SOURCE_BYTES", str(500 * 1024 * 1024)))
+_WORKDIR = Path(os.getenv("CLIPFORGE_WORKDIR", "/data")).resolve()
+_WORKDIR.mkdir(parents=True, exist_ok=True)
+_DB_PATH = Path(os.getenv("CLIPFORGE_DB_PATH", str(_WORKDIR / "clipforge.sqlite3")))
+_STORE = JobStore(_DB_PATH)
+# Source URLs are deliberately not stored in SQLite: signed URLs are bearer credentials.
+_INTERRUPTED_JOBS = _STORE.fail_interrupted()
 _EXECUTOR = ThreadPoolExecutor(max_workers=_MAX_WORKERS, thread_name_prefix="clipforge")
-_LOCK = threading.RLock()
-_JOBS: dict[str, dict[str, Any]] = {}
-_ARTIFACTS: dict[str, Path] = {}
-
-
-def _set(job_id: str, **values: Any) -> None:
-    with _LOCK:
-        _JOBS[job_id].update(values)
+_RENDER_LOCK = threading.RLock()
 
 
 def get_job(job_id: str) -> dict[str, Any] | None:
-    with _LOCK:
-        job = _JOBS.get(job_id)
-        return dict(job) if job else None
+    return _STORE.get(job_id)
 
 
 def job_artifact(job_id: str) -> Path | None:
-    with _LOCK:
-        return _ARTIFACTS.get(job_id)
+    return _STORE.artifact(job_id)
 
 
 def create_job(url: str, workdir: Path) -> str:
-    with _LOCK:
-        active = sum(1 for job in _JOBS.values() if job["state"] in {"PENDING", "RUNNING"})
-        if active >= _MAX_WORKERS * 3:
-            raise RuntimeError("Studio queue is full; retry later")
-        job_id = uuid.uuid4().hex
-        job_dir = workdir / job_id
-        job_dir.mkdir(parents=True, exist_ok=False)
-        _JOBS[job_id] = {
-            "job_id": job_id, "state": "PENDING",
-            "metrics": {"progress": 0, "stage": "Queued"},
-            "failure_reason": None, "download_url": f"/download/{job_id}",
-        }
-    _EXECUTOR.submit(_run_job, job_id, url, job_dir)
+    job_id = uuid.uuid4().hex
+    job_dir = workdir / job_id
+    job_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        _STORE.create(job_id, f"/download/{job_id}", _MAX_ACTIVE_JOBS)
+    except Exception:
+        import shutil
+        shutil.rmtree(job_dir, ignore_errors=True)
+        raise
+    try:
+        _EXECUTOR.submit(_run_job, job_id, url, job_dir)
+    except Exception as exc:
+        _STORE.update(job_id, state="FAILED", failure_reason="Worker submission failed",
+                      metrics={"progress": 100, "stage": "Worker unavailable"})
+        raise RuntimeError("Studio worker is unavailable") from exc
     return job_id
+
+
+def _set(job_id: str, **values: Any) -> None:
+    _STORE.update(job_id, **values)
 
 
 class _SupabaseRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -114,12 +114,13 @@ def _run_job(job_id: str, url: str, job_dir: Path) -> None:
                 "source_duration_seconds": media["format"]["duration"],
                 "clips": [{k: v for k, v in item.items() if k != "path"} for item in results],
                 "analysis": {"transcription": "WhisperX", "scene_detection": "PySceneDetect",
-                             "auto_editor_silence_analysis": all(x["silence_analysis"] == "Auto-Editor" for x in results),
-                             "selection": "transcript density, hook terms, and overlap suppression"},
+                             "auto_editor_silence_analysis": all(
+                                 x["silence_analysis"] == "Auto-Editor" for x in results
+                             ), "selection": "transcript density, hook terms, audio activity, and overlap suppression",
+                             "rendering": "Remotion captions and FFmpeg encoding"},
             }, indent=2))
-        with _LOCK:
-            _ARTIFACTS[job_id] = archive
-            _JOBS[job_id].update(state="COMPLETED", metrics={"progress": 100, "stage": "Clips ready"})
+        _STORE.update(job_id, artifact_path=archive, state="COMPLETED",
+                      metrics={"progress": 100, "stage": "Clips ready"})
     except Exception as exc:
         _set(job_id, state="FAILED", failure_reason=str(exc)[:1000],
              metrics={"progress": 100, "stage": "Processing failed"})
