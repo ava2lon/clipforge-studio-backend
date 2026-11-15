@@ -37,8 +37,14 @@ class JobStore:
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state)")
 
-    def create(self, job_id: str, download_url: str) -> None:
+    def create(self, job_id: str, download_url: str, max_active: int) -> None:
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            active = conn.execute(
+                "SELECT COUNT(*) AS n FROM jobs WHERE state IN ('PENDING','RUNNING')"
+            ).fetchone()["n"]
+            if int(active) >= max_active:
+                raise RuntimeError("Studio queue is full; retry later")
             conn.execute(
                 "INSERT INTO jobs(job_id,state,metrics_json,download_url) VALUES(?,?,?,?)",
                 (job_id, "PENDING", json.dumps({"progress": 0, "stage": "Queued"}), download_url),
