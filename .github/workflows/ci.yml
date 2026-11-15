@@ -31,6 +31,6 @@ jobs:
         run: npx remotion browser ensure
       - name: Validate Remotion composition
         working-directory: remotion
-        run: npx remotion compositions src/index.ts --log=error
+        run: npx remotion bundle src/index.ts --out-dir=build --log=error
       - name: Run tests
         run: pytest -q
