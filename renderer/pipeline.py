@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from fractions import Fraction
 from typing import Any, Callable
 
 class PipelineError(RuntimeError):
@@ -82,7 +83,12 @@ def _transcribe(source: Path) -> list[dict[str, Any]]:
         start, end = float(segment.get("start", 0)), float(segment.get("end", 0))
         text = str(segment.get("text", "")).strip()
         if end > start and text:
-            normalized.append({"start": start, "end": end, "text": text})
+            word_items = []
+            for word in segment.get("words", []):
+                if word.get("start") is not None and word.get("end") is not None and word.get("word"):
+                    word_items.append({"start": float(word["start"]), "end": float(word["end"]),
+                                       "text": str(word["word"]).strip()})
+            normalized.append({"start": start, "end": end, "text": text, "words": word_items})
     return normalized
 
 
@@ -95,19 +101,77 @@ def _scene_times(source: Path) -> list[float]:
         return []
 
 
-def _auto_editor_check(source: Path) -> bool:
+def _auto_editor_ranges(source: Path, output_dir: Path) -> list[tuple[float, float]]:
+    """Run Auto-Editor's audio activity analysis and parse its documented v3 timeline."""
     binary = shutil.which("auto-editor")
     if not binary:
-        return False
+        return []
+    timeline = output_dir / "auto-editor-analysis.v3"
     try:
-        result = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=10)
-        return result.returncode == 0
-    except Exception:
-        return False
+        proc = subprocess.run(
+            [binary, str(source), "--edit", "audio:threshold=0.04,stream=all",
+             "--export", "v3", "-o", str(timeline)],
+            capture_output=True, text=True, timeout=900,
+        )
+        if proc.returncode != 0 or not timeline.is_file():
+            return []
+        data = json.loads(timeline.read_text(encoding="utf-8"))
+        fps = float(Fraction(data.get("timebase", "30/1")))
+        if fps <= 0:
+            return []
+        layers = data.get("v") or data.get("a") or []
+        ranges = []
+        for layer in layers:
+            for clip in layer:
+                start = float(clip.get("offset", 0)) / fps
+                end = start + float(clip.get("dur", 0)) / fps
+                if end > start:
+                    ranges.append((start, end))
+        return sorted(ranges)
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        return []
+    finally:
+        timeline.unlink(missing_ok=True)
+
+
+def _active_ratio(start: float, end: float, ranges: list[tuple[float, float]]) -> float:
+    if not ranges or end <= start:
+        return 0.5
+    active = sum(max(0.0, min(end, right) - max(start, left)) for left, right in ranges)
+    return min(1.0, active / (end - start))
+
+
+def _render_with_remotion(source: Path, output: Path, duration: float,
+                          captions: list[dict[str, Any]]) -> Path:
+    project = Path(__file__).resolve().parents[1] / "remotion"
+    package = project / "node_modules" / ".bin" / "remotion"
+    if not package.is_file():
+        raise PipelineError("Remotion dependencies are not installed in the container")
+    public_dir = project / "public"
+    public_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, public_dir / "clip.mp4")
+    props_path = project / "clipforge-props.json"
+    props_path.write_text(json.dumps({"durationSeconds": duration, "captions": captions}),
+                          encoding="utf-8")
+    render_dir = project / "out"
+    render_dir.mkdir(parents=True, exist_ok=True)
+    rendered = render_dir / "clipforge.mp4"
+    proc = subprocess.run(
+        [str(package), "render", "src/index.ts", "ClipForge", str(rendered),
+         f"--props={props_path}", "--codec=h264", "--concurrency=2"],
+        cwd=project, capture_output=True, text=True, timeout=3600,
+    )
+    if proc.returncode != 0 or not rendered.is_file() or rendered.stat().st_size == 0:
+        raise PipelineError("Remotion render failed: " + (proc.stderr or proc.stdout)[-2500:])
+    output.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(rendered), str(output))
+    (public_dir / "clip.mp4").unlink(missing_ok=True)
+    props_path.unlink(missing_ok=True)
+    return output
 
 
 def _rank_candidates(segments: list[dict[str, Any]], scenes: list[float],
-                     duration: float) -> list[dict[str, Any]]:
+                     duration: float, active_ranges: list[tuple[float, float]] | None = None) -> list[dict[str, Any]]:
     min_len = float(os.getenv("CLIP_MIN_SECONDS", "20"))
     max_len = float(os.getenv("CLIP_MAX_SECONDS", "60"))
     max_clips = int(os.getenv("CLIP_MAX_COUNT", "8"))
@@ -135,11 +199,22 @@ def _rank_candidates(segments: list[dict[str, Any]], scenes: list[float],
             density = count / max(span, 1)
             hook = 1.0 if re.search(r"\?|\b(how|why|secret|mistake|never|best|worst|truth)\b", text, re.I) else 0.0
             scene_bonus = 0.15 if any(abs(point-start) <= 2 for point in scenes) else 0.0
-            score = min(1.0, density / 3.0) * 0.65 + hook * 0.2 + scene_bonus
             end = min(duration, last_end + 0.8, start + max_len)
+            active_ratio = _active_ratio(start, end, active_ranges or [])
+            score = (min(1.0, density / 3.0) * 0.55 + hook * 0.2
+                     + scene_bonus * 0.1 + active_ratio * 0.15)
+            caption_items = []
+            for part in words[left:right + 1]:
+                part_words = part.get("words") or [{"start": part["start"], "end": part["end"], "text": part["text"]}]
+                for word in part_words:
+                    if word["end"] > start and word["start"] < end:
+                        caption_items.append({"start": max(0.0, round(word["start"] - start, 3)),
+                                              "end": max(0.0, round(min(end, word["end"]) - start, 3)),
+                                              "text": word["text"]})
             candidates.append({"start": round(start, 3), "end": round(end, 3),
                                "duration": round(end-start, 2),
-                               "score": round(score, 4), "transcript": text[:3000]})
+                               "score": round(score, 4), "active_ratio": round(active_ratio, 3),
+                               "transcript": text[:3000], "captions": caption_items})
             break
     candidates.sort(key=lambda item: item["score"], reverse=True)
     selected = []
@@ -164,22 +239,24 @@ def analyze_and_extract(source: Path, output_dir: Path, media: dict[str, Any],
         raise PipelineError("Input has no audio stream; speech-led clipping requires audio")
     progress(18, "Detecting scene boundaries with PySceneDetect")
     scenes = _scene_times(source)
-    progress(25, "Checking Auto-Editor availability")
-    auto_editor_available = _auto_editor_check(source)
+    progress(25, "Analyzing speech activity with Auto-Editor")
+    active_ranges = _auto_editor_ranges(source, output_dir)
     progress(30, "Transcribing speech with WhisperX")
     segments = _transcribe(source)
     if not segments:
         raise PipelineError("WhisperX found no usable speech segments")
     progress(72, "Ranking transcript-led clip candidates")
-    candidates = _rank_candidates(segments, scenes, duration)
+    candidates = _rank_candidates(segments, scenes, duration, active_ranges)
     if not candidates:
         raise PipelineError("No candidate segments fit the configured clip duration range")
     results = []
     for index, candidate in enumerate(candidates, 1):
         name = f"clip-{index:02d}.mp4"
-        path = extract_clip(source, output_dir / name, candidate["start"], candidate["end"])
+        raw_path = extract_clip(source, output_dir / f"raw-{name}", candidate["start"], candidate["end"])
+        path = _render_with_remotion(raw_path, output_dir / name, candidate["duration"],
+                                     candidate.get("captions", []))
+        raw_path.unlink(missing_ok=True)
         results.append({**candidate, "name": name, "path": str(path),
-                        "scene_detection": "PySceneDetect",
-                        "auto_editor_available": auto_editor_available})
+                        "scene_detection": "PySceneDetect", "silence_analysis": "Auto-Editor"})
         progress(72 + int(18 * index / len(candidates)), f"Rendering clip {index}/{len(candidates)} with FFmpeg")
     return results
