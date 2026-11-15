@@ -22,3 +22,22 @@ def test_capabilities_shape():
     body = response.json()
     assert "ffmpeg" in body
     assert "python_modules" in body
+
+
+def test_clip_submission_requires_api_key(monkeypatch):
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    response = client.post(
+        "/clips",
+        json={"media": "https://project.supabase.co/storage/v1/object/sign/videos/source.mp4?token=test"},
+    )
+    assert response.status_code == 401
+
+
+def test_clip_submission_rejects_non_supabase_source(monkeypatch):
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    response = client.post(
+        "/clips",
+        headers={"X-API-Key": "test-secret"},
+        json={"media": "https://example.com/source.mp4"},
+    )
+    assert response.status_code == 400
