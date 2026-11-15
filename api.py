@@ -4,7 +4,6 @@ import hmac
 import os
 import shutil
 import subprocess
-from urllib.parse import urlsplit
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +12,7 @@ from pydantic import BaseModel, Field, HttpUrl
 
 from renderer.capabilities import collect_capabilities
 from renderer.jobs import create_job, get_job, job_artifact
+from renderer.security import is_allowed_supabase_storage_url
 
 APP_VERSION = "0.2.0"
 WORKDIR = Path(os.getenv("CLIPFORGE_WORKDIR", "/tmp/clipforge")).resolve()
@@ -78,9 +78,8 @@ def capabilities() -> dict[str, Any]:
 def submit_clip(request: ClipRequest, x_api_key: str | None = Header(default=None)) -> dict[str, str]:
     _authorize(x_api_key)
     url = str(request.media)
-    parsed = urlsplit(url)
-    if parsed.scheme != "https" or not parsed.hostname or not parsed.hostname.endswith(".supabase.co"):
-        raise HTTPException(status_code=400, detail="media must be an HTTPS Supabase Storage signed URL")
+    if not is_allowed_supabase_storage_url(url):
+        raise HTTPException(status_code=400, detail="media must be a valid HTTPS Supabase Storage signed URL on port 443")
     try:
         job_id = create_job(url, WORKDIR)
     except RuntimeError as exc:
