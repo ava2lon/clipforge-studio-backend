@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
+import time
 import urllib.request
 import uuid
 from urllib.parse import urlsplit
@@ -18,6 +20,8 @@ from renderer.pipeline import PipelineError, analyze_and_extract, probe_media
 _MAX_WORKERS = max(1, int(os.getenv("CLIPFORGE_MAX_WORKERS", "1")))
 _MAX_ACTIVE_JOBS = _MAX_WORKERS * 3
 _MAX_DOWNLOAD_BYTES = int(os.getenv("CLIPFORGE_MAX_SOURCE_BYTES", str(500 * 1024 * 1024)))
+_RETENTION_SECONDS = max(3600, int(os.getenv("CLIPFORGE_JOB_RETENTION_SECONDS", str(7 * 24 * 60 * 60))))
+_CLEANUP_INTERVAL_SECONDS = max(300, int(os.getenv("CLIPFORGE_CLEANUP_INTERVAL_SECONDS", "3600")))
 _WORKDIR = Path(os.getenv("CLIPFORGE_WORKDIR", "/tmp/clipforge")).resolve()
 _WORKDIR.mkdir(parents=True, exist_ok=True)
 _DB_PATH = Path(os.getenv("CLIPFORGE_DB_PATH", str(_WORKDIR / "clipforge.sqlite3")))
@@ -135,6 +139,7 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
         _set(job_id, state="FAILED", failure_reason=str(exc)[:1000],
              metrics={"progress": 100, "stage": "Processing failed"})
 
+
 def _resume_interrupted_jobs() -> None:
     for job_id in _STORE.recover_interrupted(_WORKDIR):
         job_dir = _WORKDIR / job_id
@@ -149,4 +154,16 @@ def _resume_interrupted_jobs() -> None:
             )
 
 
+def _cleanup_expired_jobs() -> None:
+    while True:
+        try:
+            removed = _STORE.cleanup_expired(_WORKDIR, _RETENTION_SECONDS)
+            if removed:
+                logging.info("Expired %s ClipForge job(s) after retention window", removed)
+        except Exception:
+            logging.exception("ClipForge job retention cleanup failed")
+        time.sleep(_CLEANUP_INTERVAL_SECONDS)
+
+
 _resume_interrupted_jobs()
+threading.Thread(target=_cleanup_expired_jobs, name="clipforge-retention", daemon=True).start()
