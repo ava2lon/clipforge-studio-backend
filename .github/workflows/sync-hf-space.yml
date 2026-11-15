@@ -21,7 +21,7 @@ jobs:
     name: Clone and sync Ava2lon/studio
     if: inputs.confirm_sync == true
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Check out backend repository
         uses: actions/checkout@v4
@@ -36,7 +36,7 @@ jobs:
           git lfs install --local
           git lfs version
 
-      - name: Clone Hugging Face Space
+      - name: Clone Hugging Face Space and hydrate every LFS object
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         shell: bash
@@ -48,14 +48,32 @@ jobs:
           fi
 
           auth_header="Basic $(printf 'Ava2lon:%s' "$HF_TOKEN" | base64 -w0)"
-          git -c http.extraheader="AUTHORIZATION: $auth_header" \
-            clone --depth 1 https://huggingface.co/spaces/Ava2lon/studio \
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.https://huggingface.co/.extraheader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: $auth_header"
+
+          # Skip automatic smudge so the clone phase is deterministic.
+          GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 \
+            https://huggingface.co/spaces/Ava2lon/studio \
             "$RUNNER_TEMP/hf-studio"
 
-          git -C "$RUNNER_TEMP/hf-studio" \
-            config http.https://huggingface.co/.extraheader "AUTHORIZATION: $auth_header"
-          git -C "$RUNNER_TEMP/hf-studio" lfs pull
+          cd "$RUNNER_TEMP/hf-studio"
+          git lfs install --local
+          git lfs fetch --all origin
+          git lfs checkout
+
+          echo "Checking all LFS pointers against hydrated local objects..."
+          git lfs fsck
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           unset auth_header
+
+          # Fail if any tracked LFS path still contains a pointer instead of its payload.
+          while IFS= read -r -d '' file; do
+            if head -c 200 "$file" | grep -aq '^version https://git-lfs.github.com/spec/v1'; then
+              echo "::error::LFS pointer was not hydrated: $file"
+              exit 1
+            fi
+          done < <(git ls-files -z)
 
       - name: Sync Space files into backend repository
         shell: bash
