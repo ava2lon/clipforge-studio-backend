@@ -23,7 +23,6 @@ _WORKDIR.mkdir(parents=True, exist_ok=True)
 _DB_PATH = Path(os.getenv("CLIPFORGE_DB_PATH", str(_WORKDIR / "clipforge.sqlite3")))
 _STORE = JobStore(_DB_PATH)
 # Source URLs are deliberately not stored in SQLite: signed URLs are bearer credentials.
-_INTERRUPTED_JOBS = _STORE.fail_interrupted()
 _EXECUTOR = ThreadPoolExecutor(max_workers=_MAX_WORKERS, thread_name_prefix="clipforge")
 _RENDER_LOCK = threading.RLock()
 
@@ -90,15 +89,26 @@ def _download(url: str, target: Path) -> None:
         raise PipelineError("Downloaded source is empty")
 
 
-def _run_job(job_id: str, url: str, job_dir: Path) -> None:
+def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = False) -> None:
     try:
-        _set(job_id, state="RUNNING", metrics={"progress": 3, "stage": "Downloading source"})
         source = job_dir / "source.media"
-        _download(url, source)
+        if resume_staged:
+            _set(job_id, state="RUNNING", metrics={"progress": 8, "stage": "Resuming staged source"})
+            if not source.is_file() or source.stat().st_size == 0:
+                raise PipelineError("Staged source is missing; resubmit this job")
+        else:
+            _set(job_id, state="RUNNING", metrics={"progress": 3, "stage": "Downloading source"})
+            if not url:
+                raise PipelineError("Source URL is unavailable; resubmit this job")
+            partial = job_dir / "source.media.part"
+            _download(url, partial)
+            os.replace(partial, source)
         media = probe_media(source)
         _set(job_id, metrics={"progress": 12, "stage": "Validating media"})
         clips_dir = job_dir / "clips"
-        clips_dir.mkdir()
+        import shutil
+        shutil.rmtree(clips_dir, ignore_errors=True)
+        clips_dir.mkdir(parents=True, exist_ok=True)
         results = analyze_and_extract(source, clips_dir, media, progress=lambda p, s: _set(
             job_id, metrics={"progress": p, "stage": s}
         ))
@@ -124,3 +134,19 @@ def _run_job(job_id: str, url: str, job_dir: Path) -> None:
     except Exception as exc:
         _set(job_id, state="FAILED", failure_reason=str(exc)[:1000],
              metrics={"progress": 100, "stage": "Processing failed"})
+
+def _resume_interrupted_jobs() -> None:
+    for job_id in _STORE.recover_interrupted(_WORKDIR):
+        job_dir = _WORKDIR / job_id
+        try:
+            _EXECUTOR.submit(_run_job, job_id, None, job_dir, True)
+        except Exception as exc:
+            _STORE.update(
+                job_id,
+                state="FAILED",
+                failure_reason=("Automatic recovery could not start: " + str(exc))[:1000],
+                metrics={"progress": 100, "stage": "Recovery worker unavailable"},
+            )
+
+
+_resume_interrupted_jobs()
