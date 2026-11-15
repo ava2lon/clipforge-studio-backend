@@ -29,21 +29,29 @@ def test_job_state_and_artifact_survive_store_reinitialization(tmp_path: Path):
     assert restarted.artifact("job-1") == artifact
 
 
-def test_restart_marks_inflight_jobs_failed_without_persisting_source_url(tmp_path: Path):
+def test_restart_resumes_only_fully_staged_source(tmp_path: Path):
     database = tmp_path / "clipforge.sqlite3"
+    workdir = tmp_path / "jobs"
+    staged = workdir / "job-staged" / "source.media"
+    staged.parent.mkdir(parents=True)
+    staged.write_bytes(b"complete-media")
+    partial = workdir / "job-partial" / "source.media.part"
+    partial.parent.mkdir(parents=True)
+    partial.write_bytes(b"incomplete-media")
+
     store = JobStore(database)
-    store.create("job-pending", "/download/job-pending", max_active=3)
-    store.create("job-running", "/download/job-running", max_active=3)
-    store.update("job-running", state="RUNNING")
+    store.create("job-staged", "/download/job-staged", max_active=3)
+    store.create("job-partial", "/download/job-partial", max_active=3)
+    store.update("job-staged", state="RUNNING")
+    store.update("job-partial", state="RUNNING")
 
     restarted = JobStore(database)
-    assert restarted.fail_interrupted() == 2
-    assert restarted.get("job-pending")["state"] == "FAILED"
-    assert restarted.get("job-running")["state"] == "FAILED"
+    assert restarted.recover_interrupted(workdir) == ["job-staged"]
+    assert restarted.get("job-staged")["state"] == "PENDING"
+    assert restarted.get("job-partial")["state"] == "FAILED"
     with closing(restarted._connect()) as conn, conn:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)")}
     assert "source_url" not in columns
-
 
 def test_queue_capacity_is_atomic_and_enforced(tmp_path: Path):
     store = JobStore(tmp_path / "clipforge.sqlite3")
