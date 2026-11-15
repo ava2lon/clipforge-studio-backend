@@ -1,36 +1,38 @@
 from __future__ import annotations
 
+import hmac
 import os
 import shutil
 import subprocess
-import tempfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from fastapi import FastAPI, Header, HTTPException
+from pydantic import BaseModel, Field, HttpUrl
 
 from renderer.capabilities import collect_capabilities
+from renderer.jobs import create_job, get_job, job_artifact
 
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.2.0"
 WORKDIR = Path(os.getenv("CLIPFORGE_WORKDIR", "/tmp/clipforge")).resolve()
 WORKDIR.mkdir(parents=True, exist_ok=True)
-
 app = FastAPI(title="ClipForge Studio Backend", version=APP_VERSION)
-allowed_origins = [x.strip() for x in os.getenv("CORS_ORIGINS", "").split(",") if x.strip()]
-if allowed_origins:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=allowed_origins,
-        allow_credentials=True,
-        allow_methods=["GET", "POST"],
-        allow_headers=["Authorization", "Content-Type"],
-    )
+
+
+class ClipRequest(BaseModel):
+    media: HttpUrl = Field(..., description="HTTPS Supabase Storage signed URL")
 
 
 class ProbeRequest(BaseModel):
-    media_path: str = Field(..., description="Path to a file staged inside the server job workspace")
+    media_path: str = Field(..., description="Path staged inside the server job workspace")
+
+
+def _authorize(x_api_key: str | None) -> None:
+    expected = os.getenv("AVA2LON_STUDIO_API_KEY", "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="Studio API key is not configured")
+    if not x_api_key or not hmac.compare_digest(x_api_key, expected):
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 def _inside_workdir(candidate: Path) -> bool:
@@ -47,10 +49,7 @@ def _probe(path: Path) -> dict[str, Any]:
         raise RuntimeError("ffprobe is not installed")
     result = subprocess.run(
         [ffprobe, "-v", "error", "-show_format", "-show_streams", "-of", "json", str(path)],
-        capture_output=True,
-        text=True,
-        timeout=45,
-        check=False,
+        capture_output=True, text=True, timeout=45, check=False,
     )
     if result.returncode:
         raise ValueError(result.stderr[-2000:] or "ffprobe could not read this media")
@@ -74,14 +73,45 @@ def capabilities() -> dict[str, Any]:
     return collect_capabilities()
 
 
+@app.post("/clips", status_code=202)
+def submit_clip(request: ClipRequest, x_api_key: str | None = Header(default=None)) -> dict[str, str]:
+    _authorize(x_api_key)
+    url = str(request.media)
+    if not url.startswith("https://") or not url.split("/", 3)[2].endswith(".supabase.co"):
+        raise HTTPException(status_code=400, detail="media must be an HTTPS Supabase Storage signed URL")
+    try:
+        job_id = create_job(url, WORKDIR)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    return {"job_id": job_id, "status_url": f"/status/{job_id}", "download_url": f"/download/{job_id}"}
+
+
+@app.get("/status/{job_id}")
+def status(job_id: str, x_api_key: str | None = Header(default=None)) -> dict[str, Any]:
+    _authorize(x_api_key)
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@app.get("/download/{job_id}")
+def download(job_id: str, x_api_key: str | None = Header(default=None)):
+    _authorize(x_api_key)
+    artifact = job_artifact(job_id)
+    if not artifact or not artifact.is_file():
+        raise HTTPException(status_code=409, detail="Job artifact is not ready")
+    from fastapi.responses import FileResponse
+    return FileResponse(artifact, media_type="application/zip", filename=f"clipforge-{job_id}.zip")
+
+
 @app.post("/media/probe")
-def media_probe(request: ProbeRequest) -> dict[str, Any]:
+def media_probe(request: ProbeRequest, x_api_key: str | None = Header(default=None)) -> dict[str, Any]:
+    _authorize(x_api_key)
     path = Path(request.media_path)
     if not _inside_workdir(path) or not path.is_file():
-        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="media_path must reference an existing file inside CLIPFORGE_WORKDIR")
     try:
         return {"media": _probe(path)}
     except (ValueError, RuntimeError) as exc:
-        from fastapi import HTTPException
         raise HTTPException(status_code=422, detail=str(exc)) from exc
