@@ -18,7 +18,7 @@ from renderer.pipeline import PipelineError, analyze_and_extract, probe_media
 _MAX_WORKERS = max(1, int(os.getenv("CLIPFORGE_MAX_WORKERS", "1")))
 _MAX_ACTIVE_JOBS = _MAX_WORKERS * 3
 _MAX_DOWNLOAD_BYTES = int(os.getenv("CLIPFORGE_MAX_SOURCE_BYTES", str(500 * 1024 * 1024)))
-_WORKDIR = Path(os.getenv("CLIPFORGE_WORKDIR", "/data")).resolve()
+_WORKDIR = Path(os.getenv("CLIPFORGE_WORKDIR", "/tmp/clipforge")).resolve()
 _WORKDIR.mkdir(parents=True, exist_ok=True)
 _DB_PATH = Path(os.getenv("CLIPFORGE_DB_PATH", str(_WORKDIR / "clipforge.sqlite3")))
 _STORE = JobStore(_DB_PATH)
