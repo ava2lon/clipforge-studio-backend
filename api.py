@@ -4,6 +4,7 @@ import hmac
 import os
 import shutil
 import subprocess
+from urllib.parse import urlsplit
 from pathlib import Path
 from typing import Any
 
@@ -77,7 +78,8 @@ def capabilities() -> dict[str, Any]:
 def submit_clip(request: ClipRequest, x_api_key: str | None = Header(default=None)) -> dict[str, str]:
     _authorize(x_api_key)
     url = str(request.media)
-    if not url.startswith("https://") or not url.split("/", 3)[2].endswith(".supabase.co"):
+    parsed = urlsplit(url)
+    if parsed.scheme != "https" or not parsed.hostname or not parsed.hostname.endswith(".supabase.co"):
         raise HTTPException(status_code=400, detail="media must be an HTTPS Supabase Storage signed URL")
     try:
         job_id = create_job(url, WORKDIR)
