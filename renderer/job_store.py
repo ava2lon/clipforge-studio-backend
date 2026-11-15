@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,7 @@ class JobStore:
         return conn
 
     def _initialize(self) -> None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=FULL")
             conn.execute("""
@@ -38,7 +39,7 @@ class JobStore:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state)")
 
     def create(self, job_id: str, download_url: str, max_active: int) -> None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             active = conn.execute(
                 "SELECT COUNT(*) AS n FROM jobs WHERE state IN ('PENDING','RUNNING')"
@@ -67,13 +68,13 @@ class JobStore:
             return
         fields.append("updated_at=CURRENT_TIMESTAMP")
         params.append(job_id)
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             cursor = conn.execute(f"UPDATE jobs SET {','.join(fields)} WHERE job_id=?", params)
             if cursor.rowcount != 1:
                 raise KeyError(f"Unknown job: {job_id}")
 
     def get(self, job_id: str) -> dict[str, Any] | None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             row = conn.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
         if row is None:
             return None
@@ -86,21 +87,21 @@ class JobStore:
         }
 
     def artifact(self, job_id: str) -> Path | None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             row = conn.execute("SELECT artifact_path FROM jobs WHERE job_id=?", (job_id,)).fetchone()
         if row is None or not row["artifact_path"]:
             return None
         return Path(row["artifact_path"])
 
     def count_active(self) -> int:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             row = conn.execute(
                 "SELECT COUNT(*) AS n FROM jobs WHERE state IN ('PENDING','RUNNING')"
             ).fetchone()
         return int(row["n"])
 
     def fail_interrupted(self) -> int:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             cursor = conn.execute(
                 """UPDATE jobs SET state='FAILED',
                    failure_reason='Processing was interrupted by a backend restart; resubmit the source.',
