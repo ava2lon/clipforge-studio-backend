@@ -1,44 +1,58 @@
 # ClipForge Studio Backend
 
-A Docker-based video processing API for ClipForge. This repository is the new source of truth; it is not copied from the empty Hugging Face Space.
+Docker-based video processing API for the ClipForge frontend. This repository is the source of truth; it is not mirrored from the previously empty Hugging Face Space.
 
-## Required processing stack
+## Processing stack
 
-- WhisperX (`m-bain/whisperX`) — transcription and word alignment.
-- PySceneDetect (`Breakthrough/PySceneDetect`) — scene boundary detection.
-- Auto-Editor (`WyattBlue/auto-editor`) — silence-aware edit analysis.
-- Remotion (`remotion-dev/remotion`) — programmatic caption/layout rendering.
-- FFmpeg (`FFmpeg/FFmpeg`) — media probing, extraction, encoding and muxing.
+- WhisperX — speech transcription and optional forced alignment.
+- PySceneDetect — content-based scene boundary detection.
+- Auto-Editor — runtime availability is checked; silence-aware edit decisions are **not yet integrated** into candidate ranking.
+- Remotion — renderer project is scaffolded; caption/layout rendering is **not yet invoked** by the job pipeline.
+- FFmpeg / FFprobe — media validation, accurate clip extraction and encoding.
 
-## Current status
+## Implemented
 
-This is the clean backend foundation: FastAPI service, health/capability reporting, secure local job workspace, FFmpeg validation, and an explicit processing adapter boundary. The heavy AI/rendering stages are wired as separately testable adapters and must be enabled only after their runtime/model requirements are satisfied. Do not report intelligent highlight ranking or Remotion rendering as complete until those stages are implemented and tested.
+- Authenticated FastAPI endpoints matching the current frontend contract: `POST /clips`, `GET /status/{job_id}`, and `GET /download/{job_id}`.
+- HTTPS Supabase signed-URL ingestion with a source-size limit.
+- WhisperX transcript-driven candidate selection, PySceneDetect scene-boundary features, overlap suppression, FFmpeg extraction and ZIP manifest packaging.
+- Configurable worker concurrency and queue admission limit.
+- Health and capability endpoints.
 
-## Run locally
+Candidate scores are deterministic heuristics based on speech density, a small set of hook-language patterns, and nearby scene boundaries. They are not a trained virality predictor and must not be marketed as such.
+
+## Important deployment limitations
+
+- Job state and artifact paths are currently in memory and local disk. A container restart loses job tracking; multiple replicas are not supported. Use a durable queue and shared object storage before production scale.
+- The job pipeline currently runs WhisperX, PySceneDetect and FFmpeg. Auto-Editor and Remotion are declared/detected but not yet part of the actual render path.
+- No diarization, face tracking, speaker-aware reframing, caption burn-in, or platform-specific layouts are implemented.
+- Protect the service with a strong `AVA2LON_STUDIO_API_KEY`. Do not expose it publicly without authentication, rate limiting, durable job storage and operational monitoring.
+
+## Configuration
+
+- `AVA2LON_STUDIO_API_KEY` — required API key, sent by the frontend as `X-API-Key`.
+- `CLIPFORGE_WORKDIR` — job workspace; defaults to `/tmp/clipforge`.
+- `CLIPFORGE_MAX_WORKERS` — concurrent jobs; defaults to `1`.
+- `CLIPFORGE_MAX_SOURCE_BYTES` — maximum downloaded source; defaults to 500 MiB.
+- `WHISPER_MODEL` — WhisperX model; defaults to `small`.
+- `WHISPER_DEVICE`, `WHISPER_COMPUTE_TYPE`, `WHISPER_BATCH_SIZE` — inference tuning.
+- `CLIP_MIN_SECONDS`, `CLIP_MAX_SECONDS`, `CLIP_MAX_COUNT` — clip selection limits.
+
+## Run
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+export AVA2LON_STUDIO_API_KEY='replace-with-a-long-random-secret'
 uvicorn api:app --host 0.0.0.0 --port 7860
 ```
 
-Set `CLIPFORGE_WORKDIR` to a persistent writable directory in production. Configure model/cache storage and GPU access according to the target Hugging Face Space hardware.
+## API contract
 
-## API
+- `GET /health`, `GET /healthz` — liveness.
+- `GET /capabilities` — installed runtime tools.
+- `POST /clips` — JSON body `{"media":"https://<project>.supabase.co/storage/v1/object/sign/..."}`; returns `job_id`.
+- `GET /status/{job_id}` — returns `PENDING`, `RUNNING`, `COMPLETED`, or `FAILED`.
+- `GET /download/{job_id}` — ZIP artifact after completion.
 
-- `GET /health` and `GET /healthz` — liveness.
-- `GET /capabilities` — installed tool availability.
-- `GET /` — service metadata.
-
-The initial API deliberately does not expose unauthenticated arbitrary URL fetching or arbitrary filesystem paths. Add authenticated job submission and storage integration against the existing frontend contract before enabling public production traffic.
-
-## Container
-
-The Docker image installs FFmpeg and Node.js, then installs the Python API dependencies. Remotion's project/runtime is kept in `remotion/` and is built separately from the Python service.
-
-## Development
-
-```bash
-pytest -q
-```
+All job endpoints require `X-API-Key`.
