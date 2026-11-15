@@ -1,0 +1,26 @@
+name: Deploy ClipForge Backend to Hugging Face
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout backend repository
+        uses: actions/checkout@v6
+
+      - name: Sync backend to Hugging Face Space
+        uses: huggingface/hub-sync@v0.3.0
+        with:
+          github_repo_id: ${{ github.repository }}
+          huggingface_repo_id: ava2lon/studio
+          hf_token: ${{ secrets.HF_TOKEN }}
+          space_sdk: docker
+          
