@@ -18,13 +18,13 @@ Docker-based video processing API for the ClipForge frontend. This repository is
 - Configurable worker concurrency and queue admission limit.
 - Health and capability endpoints.
 
-Candidate scores are deterministic heuristics based on speech density, a small set of hook-language patterns, and nearby scene boundaries. They are not a trained virality predictor and must not be marketed as such.
+Candidate scores are deterministic heuristics based on speech density, a small set of hook-language patterns, nearby scene boundaries, and Auto-Editor active-audio overlap. They are not a trained virality predictor and must not be marketed as such.
 
 ## Important deployment limitations
 
 - Job state and artifact paths are currently in memory and local disk. A container restart loses job tracking; multiple replicas are not supported. Use a durable queue and shared object storage before production scale.
 - The job pipeline invokes WhisperX, PySceneDetect, Auto-Editor, Remotion and FFmpeg. Auto-Editor silence intervals and Remotion caption overlays are integrated, but require an end-to-end test against real source media and the target Space hardware.
-- No diarization, face tracking, speaker-aware reframing, caption burn-in, or platform-specific layouts are implemented.
+- No diarization, face tracking, speaker-aware reframing, or configurable platform-specific layouts are implemented.
 - Protect the service with a strong `AVA2LON_STUDIO_API_KEY`. Do not expose it publicly without authentication, rate limiting, durable job storage and operational monitoring.
 
 ## Configuration
