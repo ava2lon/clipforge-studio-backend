@@ -6,8 +6,8 @@ Docker-based video processing API for the ClipForge frontend. This repository is
 
 - WhisperX — speech transcription and optional forced alignment.
 - PySceneDetect — content-based scene boundary detection.
-- Auto-Editor — runtime availability is checked; silence-aware edit decisions are **not yet integrated** into candidate ranking.
-- Remotion — renderer project is scaffolded; caption/layout rendering is **not yet invoked** by the job pipeline.
+- Auto-Editor — exports a v3 timeline using audio activity detection; active ranges contribute to candidate ranking.
+- Remotion — renders each extracted clip to a 1080×1920 composition with WhisperX-derived captions.
 - FFmpeg / FFprobe — media validation, accurate clip extraction and encoding.
 
 ## Implemented
@@ -23,7 +23,7 @@ Candidate scores are deterministic heuristics based on speech density, a small s
 ## Important deployment limitations
 
 - Job state and artifact paths are currently in memory and local disk. A container restart loses job tracking; multiple replicas are not supported. Use a durable queue and shared object storage before production scale.
-- The job pipeline currently runs WhisperX, PySceneDetect and FFmpeg. Auto-Editor and Remotion are declared/detected but not yet part of the actual render path.
+- The job pipeline invokes WhisperX, PySceneDetect, Auto-Editor, Remotion and FFmpeg. Auto-Editor silence intervals and Remotion caption overlays are integrated, but require an end-to-end test against real source media and the target Space hardware.
 - No diarization, face tracking, speaker-aware reframing, caption burn-in, or platform-specific layouts are implemented.
 - Protect the service with a strong `AVA2LON_STUDIO_API_KEY`. Do not expose it publicly without authentication, rate limiting, durable job storage and operational monitoring.
 
