@@ -100,6 +100,35 @@ class JobStore:
             ).fetchone()
         return int(row["n"])
 
+
+    def recover_interrupted(self, workdir: str | Path) -> list[str]:
+        """Requeue interrupted jobs only when their fully staged source still exists."""
+        root = Path(workdir).resolve()
+        resumed: list[str] = []
+        with closing(self._connect()) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                "SELECT job_id FROM jobs WHERE state IN ('PENDING','RUNNING')"
+            ).fetchall()
+            for row in rows:
+                job_id = row["job_id"]
+                source = root / job_id / "source.media"
+                if source.is_file() and source.stat().st_size > 0:
+                    conn.execute(
+                        """UPDATE jobs SET state='PENDING', failure_reason=NULL,
+                           metrics_json=?, updated_at=CURRENT_TIMESTAMP WHERE job_id=?""",
+                        (json.dumps({"progress": 5, "stage": "Recovering staged source"}), job_id),
+                    )
+                    resumed.append(job_id)
+                else:
+                    conn.execute(
+                        """UPDATE jobs SET state='FAILED',
+                           failure_reason='Processing was interrupted before the source was fully staged; resubmit the source.',
+                           metrics_json=?, updated_at=CURRENT_TIMESTAMP WHERE job_id=?""",
+                        (json.dumps({"progress": 100, "stage": "Interrupted during source staging"}), job_id),
+                    )
+        return resumed
+
     def fail_interrupted(self) -> int:
         with closing(self._connect()) as conn, conn:
             cursor = conn.execute(
