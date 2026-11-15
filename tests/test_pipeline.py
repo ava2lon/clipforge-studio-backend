@@ -16,3 +16,21 @@ def test_rank_candidates_respects_duration_and_deduplicates():
 
 def test_rank_candidates_empty_transcript():
     assert _rank_candidates([], [], 90.0) == []
+
+
+def test_parse_auto_editor_v1_kept_ranges():
+    from renderer.pipeline import _parse_auto_editor_timeline
+
+    timeline = {
+        "version": "1",
+        "timebase": "30/1",
+        "chunks": [[0, 30, 1], [30, 60, 99999], [60, 120, 1]],
+    }
+    assert _parse_auto_editor_timeline(timeline) == [(0.0, 1.0), (2.0, 4.0)]
+
+
+def test_parse_auto_editor_v1_fractional_timebase():
+    from renderer.pipeline import _parse_auto_editor_timeline
+
+    timeline = {"version": "1", "timebase": "30000/1001", "chunks": [[0, 30000, 1]]}
+    assert _parse_auto_editor_timeline(timeline) == [(0.0, 1001.0)]
