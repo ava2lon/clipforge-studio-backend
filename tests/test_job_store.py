@@ -1,4 +1,5 @@
 from pathlib import Path
+from contextlib import closing
 
 import pytest
 
@@ -39,7 +40,7 @@ def test_restart_marks_inflight_jobs_failed_without_persisting_source_url(tmp_pa
     assert restarted.fail_interrupted() == 2
     assert restarted.get("job-pending")["state"] == "FAILED"
     assert restarted.get("job-running")["state"] == "FAILED"
-    with restarted._connect() as conn:
+    with closing(restarted._connect()) as conn, conn:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)")}
     assert "source_url" not in columns
 
