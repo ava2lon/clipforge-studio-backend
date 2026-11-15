@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "render": "remotion render src/index.tsx ClipForge out/clipforge.mp4"
+    "render": "remotion render src/index.ts ClipForge out/clipforge.mp4"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.0",
