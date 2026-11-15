@@ -105,38 +105,56 @@ def _scene_times(source: Path) -> list[float]:
         return []
 
 
+def _parse_auto_editor_timeline(data: dict[str, Any]) -> list[tuple[float, float]]:
+    """Read Auto-Editor's stable v1 chunks; also accept v3 for newer CLI builds."""
+    if data.get("chunks") is not None:
+        fps = float(Fraction(data.get("timebase", "30/1")))
+        if fps <= 0:
+            return []
+        ranges = []
+        for chunk in data["chunks"]:
+            if len(chunk) < 3:
+                continue
+            start, end, speed = float(chunk[0]), float(chunk[1]), float(chunk[2])
+            # v1 speed 0/99999 represents a cut; other speeds are retained media.
+            if end > start and speed not in (0.0, 99999.0):
+                ranges.append((start / fps, end / fps))
+        return sorted(ranges)
+
+    fps = float(Fraction(data.get("timebase", "30/1")))
+    if fps <= 0:
+        return []
+    layers = data.get("v") or data.get("a") or []
+    ranges = []
+    for layer in layers:
+        for clip in layer:
+            start = float(clip.get("offset", 0)) / fps
+            end = start + float(clip.get("dur", 0)) / fps
+            if end > start:
+                ranges.append((start, end))
+    return sorted(ranges)
+
+
 def _auto_editor_ranges(source: Path, output_dir: Path) -> list[tuple[float, float]]:
-    """Run Auto-Editor's audio activity analysis and parse its documented v3 timeline."""
+    """Run Auto-Editor's audio activity analysis and parse its stable v1 cut list."""
     binary = shutil.which("auto-editor")
     if not binary:
         return []
-    timeline = output_dir / "auto-editor-analysis.v3"
+    timeline = output_dir / "auto-editor-analysis.v1"
     try:
         proc = subprocess.run(
             [binary, str(source), "--edit", "audio:threshold=0.04,stream=all",
-             "--export", "v3", "-o", str(timeline)],
+             "--export", "v1", "-o", str(timeline)],
             capture_output=True, text=True, timeout=900,
         )
         if proc.returncode != 0 or not timeline.is_file():
             return []
         data = json.loads(timeline.read_text(encoding="utf-8"))
-        fps = float(Fraction(data.get("timebase", "30/1")))
-        if fps <= 0:
-            return []
-        layers = data.get("v") or data.get("a") or []
-        ranges = []
-        for layer in layers:
-            for clip in layer:
-                start = float(clip.get("offset", 0)) / fps
-                end = start + float(clip.get("dur", 0)) / fps
-                if end > start:
-                    ranges.append((start, end))
-        return sorted(ranges)
+        return _parse_auto_editor_timeline(data)
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
         return []
     finally:
         timeline.unlink(missing_ok=True)
-
 
 def _active_ratio(start: float, end: float, ranges: list[tuple[float, float]]) -> float:
     if not ranges or end <= start:
