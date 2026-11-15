@@ -6,7 +6,7 @@ Docker-based video processing API for the ClipForge frontend. This repository is
 
 - WhisperX — speech transcription and optional forced alignment.
 - PySceneDetect — content-based scene boundary detection.
-- Auto-Editor — exports a v3 timeline using audio activity detection; active ranges contribute to candidate ranking.
+- Auto-Editor — exports its stable v1 cut list using audio activity detection; retained ranges contribute to candidate ranking.
 - Remotion — renders each extracted clip to a 1080×1920 composition with WhisperX-derived captions.
 - FFmpeg / FFprobe — media validation, accurate clip extraction and encoding.
 
