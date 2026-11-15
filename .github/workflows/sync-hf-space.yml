@@ -1,0 +1,104 @@
+name: Sync Hugging Face Space to GitHub
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_sync:
+        description: "Confirm mirroring the Hugging Face Space into this repository"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hf-space-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Clone and sync Ava2lon/studio
+    if: inputs.confirm_sync == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out backend repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          lfs: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Git LFS
+        run: |
+          git lfs install --local
+          git lfs version
+
+      - name: Clone Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${HF_TOKEN:-}" ]]; then
+            echo "::error::HF_TOKEN secret is missing or empty."
+            exit 1
+          fi
+
+          auth_header="Basic $(printf 'Ava2lon:%s' "$HF_TOKEN" | base64 -w0)"
+          git -c http.extraheader="AUTHORIZATION: $auth_header" \
+            clone --depth 1 https://huggingface.co/spaces/Ava2lon/studio \
+            "$RUNNER_TEMP/hf-studio"
+
+          git -C "$RUNNER_TEMP/hf-studio" \
+            config http.https://huggingface.co/.extraheader "AUTHORIZATION: $auth_header"
+          git -C "$RUNNER_TEMP/hf-studio" lfs pull
+          unset auth_header
+
+      - name: Sync Space files into backend repository
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          source_dir="$RUNNER_TEMP/hf-studio/"
+          target_dir="$GITHUB_WORKSPACE/"
+
+          # Preserve this repository's Git metadata and GitHub Actions workflows.
+          # Exclude environment files, local credentials, and known cookie storage.
+          rsync -a --delete \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='.env' \
+            --exclude='.env.*' \
+            --exclude='**/.env' \
+            --exclude='**/.env.*' \
+            --exclude='**/cookies/' \
+            --exclude='**/cookies/**' \
+            --exclude='*.pem' \
+            --exclude='*.key' \
+            "$source_dir" "$target_dir"
+
+      - name: Commit and push synchronized source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No source changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Sync backend from Hugging Face Space"
+          git push origin HEAD:main
+
+      - name: Report Git LFS inventory
+        if: always()
+        run: |
+          if git lfs version >/dev/null 2>&1; then
+            git lfs ls-files || true
+          fi
