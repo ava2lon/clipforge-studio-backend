@@ -8,7 +8,6 @@ import threading
 import time
 import urllib.request
 import uuid
-from urllib.parse import urlsplit
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -16,6 +15,7 @@ from typing import Any
 
 from renderer.job_store import JobStore
 from renderer.pipeline import PipelineError, analyze_and_extract, probe_media
+from renderer.security import is_allowed_supabase_storage_url
 
 _MAX_WORKERS = max(1, int(os.getenv("CLIPFORGE_MAX_WORKERS", "1")))
 _MAX_ACTIVE_JOBS = _MAX_WORKERS * 3
@@ -64,13 +64,14 @@ def _set(job_id: str, **values: Any) -> None:
 
 class _SupabaseRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        parsed = urlsplit(newurl)
-        if parsed.scheme != "https" or not parsed.hostname or not parsed.hostname.endswith(".supabase.co"):
-            raise PipelineError("Source URL redirected outside the allowed Supabase host")
+        if not is_allowed_supabase_storage_url(newurl):
+            raise PipelineError("Source URL redirected outside the allowed Supabase Storage endpoint")
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 def _download(url: str, target: Path) -> None:
+    if not is_allowed_supabase_storage_url(url):
+        raise PipelineError("Source URL is not an allowed Supabase Storage signed URL")
     request = urllib.request.Request(url, headers={"User-Agent": "ClipForge-Studio/0.2"})
     total = 0
     opener = urllib.request.build_opener(_SupabaseRedirectHandler())
