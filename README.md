@@ -22,7 +22,7 @@ Candidate scores are deterministic heuristics based on speech density, a small s
 
 ## Important deployment limitations
 
-- Job state and artifact paths are currently in memory and local disk. A container restart loses job tracking; multiple replicas are not supported. Use a durable queue and shared object storage before production scale.
+- Job metadata and artifact references are stored in SQLite at `CLIPFORGE_DB_PATH` (default `/data/clipforge.sqlite3`). Mount persistent Hugging Face Space storage at `/data` to retain completed jobs and ZIP files across container rebuilds. In-flight jobs are marked failed on restart and must be resubmitted; signed source URLs are intentionally not stored. This remains a single-container design; multiple replicas are not supported.
 - The job pipeline invokes WhisperX, PySceneDetect, Auto-Editor, Remotion and FFmpeg. Auto-Editor silence intervals and Remotion caption overlays are integrated, but require an end-to-end test against real source media and the target Space hardware.
 - No diarization, face tracking, speaker-aware reframing, or configurable platform-specific layouts are implemented.
 - Protect the service with a strong `AVA2LON_STUDIO_API_KEY`. Do not expose it publicly without authentication, rate limiting, durable job storage and operational monitoring.
@@ -30,7 +30,8 @@ Candidate scores are deterministic heuristics based on speech density, a small s
 ## Configuration
 
 - `AVA2LON_STUDIO_API_KEY` — required API key, sent by the frontend as `X-API-Key`.
-- `CLIPFORGE_WORKDIR` — job workspace; defaults to `/tmp/clipforge`.
+- `CLIPFORGE_WORKDIR` — job workspace; defaults to `/data`.
+- `CLIPFORGE_DB_PATH` — SQLite metadata database; defaults to `/data/clipforge.sqlite3`.
 - `CLIPFORGE_MAX_WORKERS` — concurrent jobs; defaults to `1`.
 - `CLIPFORGE_MAX_SOURCE_BYTES` — maximum downloaded source; defaults to 500 MiB.
 - `WHISPER_MODEL` — WhisperX model; defaults to `small`.
