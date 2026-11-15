@@ -10,6 +10,7 @@ import os
 import threading
 import urllib.request
 import uuid
+from urllib.parse import urlsplit
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -58,10 +59,22 @@ def create_job(url: str, workdir: Path) -> str:
     return job_id
 
 
+class _SupabaseRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        parsed = urlsplit(newurl)
+        if parsed.scheme != "https" or not parsed.hostname or not parsed.hostname.endswith(".supabase.co"):
+            raise PipelineError("Source URL redirected outside the allowed Supabase host")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def _download(url: str, target: Path) -> None:
     request = urllib.request.Request(url, headers={"User-Agent": "ClipForge-Studio/0.2"})
     total = 0
-    with urllib.request.urlopen(request, timeout=60) as response, target.open("wb") as output:
+    opener = urllib.request.build_opener(_SupabaseRedirectHandler())
+    with opener.open(request, timeout=60) as response, target.open("wb") as output:
+        content_length = response.headers.get("Content-Length")
+        if content_length and int(content_length) > _MAX_DOWNLOAD_BYTES:
+            raise PipelineError("Source exceeds configured maximum source size")
         content_type = response.headers.get("Content-Type", "")
         if not (content_type.startswith("video/") or content_type.startswith("application/octet-stream")):
             raise PipelineError(f"Unsupported source content type: {content_type or 'unknown'}")
