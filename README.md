@@ -17,12 +17,15 @@ Docker-based video processing API for the ClipForge frontend. This repository is
 - WhisperX transcript-driven candidate selection, PySceneDetect scene-boundary features, overlap suppression, FFmpeg extraction and ZIP manifest packaging.
 - Configurable worker concurrency and queue admission limit.
 - Health and capability endpoints.
+- SQLite-backed job metadata and automatic restart recovery when a complete source file was staged before interruption.
+- Automatic workspace and database cleanup for completed/failed jobs after the retention window (default seven days); cleanup runs hourly.
 
 Candidate scores are deterministic heuristics based on speech density, a small set of hook-language patterns, nearby scene boundaries, and Auto-Editor active-audio overlap. They are not a trained virality predictor and must not be marketed as such.
 
 ## Important deployment limitations
 
 - Job metadata and artifact references are stored in SQLite at `CLIPFORGE_DB_PATH` (default `/data/clipforge.sqlite3`). Mount persistent Hugging Face Space storage at `/data` to retain completed jobs and ZIP files across container rebuilds. On restart, jobs with a fully staged source file are automatically requeued from that local file; jobs interrupted during download are marked failed and must be resubmitted. Signed source URLs are intentionally not stored. This remains a single-container design; multiple replicas are not supported.
+- Completed and failed job records, source files, clips and ZIPs are removed after the retention period. Set `CLIPFORGE_JOB_RETENTION_SECONDS` to change it (minimum one hour); set `CLIPFORGE_CLEANUP_INTERVAL_SECONDS` to change the cleanup polling interval (minimum five minutes).
 - The job pipeline invokes WhisperX, PySceneDetect, Auto-Editor, Remotion and FFmpeg. Auto-Editor silence intervals and Remotion caption overlays are integrated, but require an end-to-end test against real source media and the target Space hardware.
 - No diarization, face tracking, speaker-aware reframing, or configurable platform-specific layouts are implemented.
 - Protect the service with a strong `AVA2LON_STUDIO_API_KEY`. Do not expose it publicly without authentication, rate limiting, durable job storage and operational monitoring.
@@ -34,6 +37,8 @@ Candidate scores are deterministic heuristics based on speech density, a small s
 - `CLIPFORGE_DB_PATH` — SQLite metadata database; defaults to `/data/clipforge.sqlite3`.
 - `CLIPFORGE_MAX_WORKERS` — concurrent jobs; defaults to `1`.
 - `CLIPFORGE_MAX_SOURCE_BYTES` — maximum downloaded source; defaults to 500 MiB.
+- `CLIPFORGE_JOB_RETENTION_SECONDS` — terminal-job workspace/database retention; defaults to seven days, minimum one hour.
+- `CLIPFORGE_CLEANUP_INTERVAL_SECONDS` — cleanup polling interval; defaults to one hour, minimum five minutes.
 - `WHISPER_MODEL` — WhisperX model; defaults to `small`.
 - `WHISPER_DEVICE`, `WHISPER_COMPUTE_TYPE`, `WHISPER_BATCH_SIZE` — inference tuning.
 - `CLIP_MIN_SECONDS`, `CLIP_MAX_SECONDS`, `CLIP_MAX_COUNT` — clip selection limits.
