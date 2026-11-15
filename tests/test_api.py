@@ -41,3 +41,20 @@ def test_clip_submission_rejects_non_supabase_source(monkeypatch):
         json={"media": "https://example.com/source.mp4"},
     )
     assert response.status_code == 400
+
+
+
+def test_clip_submission_rejects_unsafe_supabase_urls(monkeypatch):
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    headers = {"X-API-Key": "test-secret"}
+    unsafe_urls = [
+        "http://project.supabase.co/storage/v1/object/sign/videos/source.mp4?token=test",
+        "https://user:pass@project.supabase.co/storage/v1/object/sign/videos/source.mp4?token=test",
+        "https://project.supabase.co:8443/storage/v1/object/sign/videos/source.mp4?token=test",
+        "https://project.supabase.co/storage/v1/object/sign/videos/source.mp4#fragment",
+        "https://project.supabase.co/rest/v1/users?select=*",
+        "https://project.supabase.co.evil.test/storage/v1/object/sign/videos/source.mp4?token=test",
+    ]
+    for media in unsafe_urls:
+        response = client.post("/clips", headers=headers, json={"media": media})
+        assert response.status_code in (400, 422), (media, response.text)
