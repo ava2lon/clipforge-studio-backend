@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -37,6 +38,7 @@ class JobStore:
                 )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_updated_at ON jobs(updated_at)")
 
     def create(self, job_id: str, download_url: str, max_active: int) -> None:
         with closing(self._connect()) as conn, conn:
@@ -100,7 +102,6 @@ class JobStore:
             ).fetchone()
         return int(row["n"])
 
-
     def recover_interrupted(self, workdir: str | Path) -> list[str]:
         """Requeue interrupted jobs only when their fully staged source still exists."""
         root = Path(workdir).resolve()
@@ -128,6 +129,45 @@ class JobStore:
                         (json.dumps({"progress": 100, "stage": "Interrupted during source staging"}), job_id),
                     )
         return resumed
+
+    def cleanup_expired(self, workdir: str | Path, retention_seconds: int) -> int:
+        """Delete terminal jobs and their workspaces after the configured retention period."""
+        if retention_seconds < 3600:
+            raise ValueError("retention_seconds must be at least one hour")
+        root = Path(workdir).resolve()
+        modifier = f"-{int(retention_seconds)} seconds"
+        with closing(self._connect()) as conn, conn:
+            rows = conn.execute(
+                """SELECT job_id FROM jobs
+                   WHERE state IN ('COMPLETED','FAILED')
+                     AND updated_at < datetime('now', ?)""",
+                (modifier,),
+            ).fetchall()
+
+        removed = 0
+        for row in rows:
+            job_id = row["job_id"]
+            job_dir = (root / job_id).resolve()
+            try:
+                job_dir.relative_to(root)
+            except ValueError:
+                continue
+            try:
+                shutil.rmtree(job_dir, ignore_errors=False)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                continue
+
+            with closing(self._connect()) as conn, conn:
+                cursor = conn.execute(
+                    """DELETE FROM jobs
+                       WHERE job_id=? AND state IN ('COMPLETED','FAILED')
+                         AND updated_at < datetime('now', ?)""",
+                    (job_id, modifier),
+                )
+                removed += cursor.rowcount
+        return removed
 
     def fail_interrupted(self) -> int:
         with closing(self._connect()) as conn, conn:
