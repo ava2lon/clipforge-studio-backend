@@ -114,7 +114,7 @@ def _run_job(job_id: str, url: str, job_dir: Path) -> None:
                 "source_duration_seconds": media["format"]["duration"],
                 "clips": [{k: v for k, v in item.items() if k != "path"} for item in results],
                 "analysis": {"transcription": "WhisperX", "scene_detection": "PySceneDetect",
-                             "auto_editor_available": all(x["auto_editor_available"] for x in results),
+                             "auto_editor_silence_analysis": all(x["silence_analysis"] == "Auto-Editor" for x in results),
                              "selection": "transcript density, hook terms, and overlap suppression"},
             }, indent=2))
         with _LOCK:
