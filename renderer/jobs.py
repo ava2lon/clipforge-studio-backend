@@ -360,7 +360,17 @@ def render_clip_edit(job_id: str, edit_id: str, workdir: Path) -> dict[str, Any]
                 continue
         if active_edits >= 3:
             raise RuntimeError("This job already has three edits queued or rendering")
-        if _STORE.count_active() + active_edits >= _MAX_ACTIVE_JOBS:
+        global_active_edits = 0
+        for candidate_dir in workdir.iterdir():
+            if not candidate_dir.is_dir():
+                continue
+            for saved_path in candidate_dir.glob("edits/*/edit.json"):
+                try:
+                    saved_state = json.loads(saved_path.read_text(encoding="utf-8"))
+                    global_active_edits += saved_state.get("state") in {"QUEUED", "RUNNING"}
+                except (OSError, ValueError):
+                    continue
+        if _STORE.count_active() + global_active_edits >= _MAX_ACTIVE_JOBS:
             raise RuntimeError("Studio render queue is full; retry when another job finishes")
         state["state"] = "QUEUED"
         state["failure_reason"] = None
