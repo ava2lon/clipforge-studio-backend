@@ -9,7 +9,7 @@ import {
 } from "remotion";
 
 type Caption = { start: number; end: number; text: string };
-type ClipForgeProps = { durationSeconds: number; captions: Caption[] };
+type ClipForgeProps = { durationSeconds: number; captions: Caption[]; aspectRatio: "9:16" | "1:1" | "16:9" };
 
 const CaptionOverlay: React.FC<{ captions: Caption[] }> = ({ captions }) => {
   const frame = useCurrentFrame();
@@ -61,9 +61,15 @@ export const RemotionRoot: React.FC = () => (
     fps={30}
     width={1080}
     height={1920}
-    defaultProps={{ durationSeconds: 5, captions: [] }}
-    calculateMetadata={({ props }) => ({
-      durationInFrames: Math.max(1, Math.ceil(props.durationSeconds * 30)),
-    })}
+    defaultProps={{ durationSeconds: 5, captions: [], aspectRatio: "9:16" }}
+    calculateMetadata={({ props }) => {
+      const dimensions = props.aspectRatio === "16:9" ? { width: 1920, height: 1080 }
+        : props.aspectRatio === "1:1" ? { width: 1080, height: 1080 }
+        : { width: 1080, height: 1920 };
+      return {
+        ...dimensions,
+        durationInFrames: Math.max(1, Math.ceil(props.durationSeconds * 30)),
+      };
+    }}
   />
 );
