@@ -102,3 +102,37 @@ def test_clip_submission_rejects_direct_url_with_credentials(monkeypatch):
         json={"media": "https://user:pass@cdn.example.net/video.mp4"},
     )
     assert response.status_code == 400
+
+
+
+def test_clip_submission_accepts_caption_presets(monkeypatch):
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    captured = {}
+    def fake_create_job(url, workdir, *args):
+        captured["args"] = args
+        return "c" * 32
+    monkeypatch.setattr("api.create_job", fake_create_job)
+    response = client.post(
+        "/clips",
+        headers={"X-API-Key": "test-secret"},
+        json={
+            "media": "https://cdn.example.net/video.mp4",
+            "caption_style": "minimal",
+            "caption_position": "top",
+        },
+    )
+    assert response.status_code == 202
+    assert captured["args"][-2:] == ("minimal", "top")
+
+
+def test_clip_submission_rejects_unknown_caption_preset(monkeypatch):
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    response = client.post(
+        "/clips",
+        headers={"X-API-Key": "test-secret"},
+        json={
+            "media": "https://cdn.example.net/video.mp4",
+            "caption_style": "neon-glitch",
+        },
+    )
+    assert response.status_code == 422
