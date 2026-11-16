@@ -198,6 +198,44 @@ def download_direct_mp4(url: str, target: Path, max_bytes: int) -> None:
         raise
 
 
+def _social_extraction_error(source_type: str, diagnostic: str) -> PipelineError:
+    """Translate extractor diagnostics into safe, actionable user-facing errors."""
+    message = diagnostic.lower()
+    access_markers = (
+        "sign in to confirm", "not a bot", "login required", "authentication required",
+        "private video", "members-only", "join this channel",
+    )
+    unavailable_markers = (
+        "video unavailable", "video has been removed", "this video is private",
+        "does not exist", "account has been terminated", "post not found",
+    )
+    transient_markers = (
+        "http error 429", "http error 500", "http error 502", "http error 503",
+        "http error 504", "timed out", "timeout", "temporary failure",
+        "connection reset", "connection refused", "network is unreachable",
+    )
+    if any(marker in message for marker in access_markers):
+        return SourceAccessRequired(
+            f"This {source_type.title()} link was accepted, but the platform requires "
+            "sign-in or additional verification before it will provide the video. "
+            "ClipForge does not bypass that restriction."
+        )
+    if any(marker in message for marker in unavailable_markers):
+        return PipelineError(
+            f"The {source_type.title()} platform reports that this video is private, "
+            "removed, or unavailable."
+        )
+    if any(marker in message for marker in transient_markers):
+        return PipelineError(
+            f"The {source_type.title()} platform or network returned a temporary "
+            "retrieval error. Retry the job later."
+        )
+    return PipelineError(
+        f"Could not retrieve this public {source_type.title()} video. "
+        "It may be unavailable or restricted by the platform."
+    )
+
+
 def download_social_video(url: str, target: Path, max_bytes: int) -> None:
     """Best-effort unauthenticated public-video extraction using yt-dlp.
 
@@ -235,16 +273,20 @@ def download_social_video(url: str, target: Path, max_bytes: int) -> None:
     except FileNotFoundError as exc:
         raise PipelineError("Social video extraction is unavailable: yt-dlp is not installed") from exc
     except subprocess.TimeoutExpired as exc:
+        for path in target.parent.glob(output_base.name + ".*"):
+            path.unlink(missing_ok=True)
         raise PipelineError("Social video extraction exceeded the 15-minute time limit") from exc
+
     candidates = list(target.parent.glob(output_base.name + ".*"))
     mp4_files = [path for path in candidates if path.suffix.lower() == ".mp4" and path.is_file()]
     if result.returncode != 0 or not mp4_files:
+        diagnostic = "\n".join(
+            part for part in (getattr(result, "stderr", ""), getattr(result, "stdout", ""))
+            if isinstance(part, str)
+        )[-12000:]
         for path in candidates:
             path.unlink(missing_ok=True)
-        raise PipelineError(
-            f"Could not retrieve this public {source_type.title()} video. "
-            "It may be private, unavailable, age-restricted, or temporarily blocked by the platform."
-        )
+        raise _social_extraction_error(source_type, diagnostic)
     downloaded = mp4_files[0]
     try:
         size = downloaded.stat().st_size
