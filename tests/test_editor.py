@@ -166,3 +166,45 @@ def test_interrupted_editor_render_respects_global_queue_capacity(tmp_path, monk
     recovered = jobs.get_clip_edit(job_id, state["edit_id"], tmp_path)
     assert recovered["state"] == "FAILED"
     assert "queue is full" in recovered["failure_reason"]
+
+
+def test_retry_job_reuses_staged_source_and_saved_options(tmp_path, monkeypatch):
+    job_id, job_dir = _fixture_job(tmp_path, monkeypatch)
+    (job_dir / "source.media").write_bytes(b"fully-staged-source")
+    (job_dir / "clipforge-options.json").write_text(json.dumps({"broll_assets": []}), encoding="utf-8")
+    submitted = []
+
+    class RetryStore:
+        def get(self, value):
+            return {"state": "FAILED"} if value == job_id else None
+
+        def retry_failed(self, value, max_active, max_attempts):
+            assert value == job_id
+            assert max_active > 0
+            assert max_attempts == 3
+            return 2
+
+    class FakeExecutor:
+        def submit(self, fn, *args):
+            submitted.append((fn.__name__, args))
+
+    monkeypatch.setattr(jobs, "_STORE", RetryStore())
+    monkeypatch.setattr(jobs, "_WORKDIR", tmp_path)
+    monkeypatch.setattr(jobs, "_EXECUTOR", FakeExecutor())
+    result = jobs.retry_job(job_id)
+
+    assert result == {"job_id": job_id, "state": "PENDING", "attempt_count": 2}
+    assert submitted == [("_run_job", (job_id, None, job_dir, True))]
+
+
+def test_retry_job_requires_fully_staged_source(tmp_path, monkeypatch):
+    job_id, _ = _fixture_job(tmp_path, monkeypatch)
+
+    class RetryStore:
+        def get(self, value):
+            return {"state": "FAILED"}
+
+    monkeypatch.setattr(jobs, "_STORE", RetryStore())
+    monkeypatch.setattr(jobs, "_WORKDIR", tmp_path)
+    with pytest.raises(ValueError, match="complete staged source"):
+        jobs.retry_job(job_id)
