@@ -9,6 +9,8 @@ import {
 } from "remotion";
 
 type Caption = { start: number; end: number; text: string };
+type CaptionStyle = "karaoke" | "bold" | "minimal";
+type CaptionPosition = "top" | "center" | "bottom";
 type FocusKeyframe = { time: number; x: number; y: number };
 type ClipForgeProps = {
   durationSeconds: number;
@@ -17,6 +19,8 @@ type ClipForgeProps = {
   focusKeyframes: FocusKeyframe[];
   sourceWidth: number;
   sourceHeight: number;
+  captionStyle: CaptionStyle;
+  captionPosition: CaptionPosition;
 };
 
 const clamp = (value: number, min: number, max: number) =>
@@ -71,40 +75,69 @@ const cropPosition = (
   return `${x}% ${y}%`;
 };
 
-const CaptionOverlay: React.FC<{ captions: Caption[] }> = ({ captions }) => {
+const CaptionOverlay: React.FC<{
+  captions: Caption[];
+  style: CaptionStyle;
+  position: CaptionPosition;
+}> = ({ captions, style, position }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, height } = useVideoConfig();
   const seconds = frame / fps;
-  const active = captions.find((caption) => seconds >= caption.start && seconds <= caption.end);
+  const activeIndex = captions.findIndex((caption) => seconds >= caption.start && seconds < caption.end);
+  if (activeIndex < 0) return null;
 
-  if (!active?.text) return null;
+  const groups: Caption[][] = [];
+  for (const caption of captions) {
+    const current = groups[groups.length - 1];
+    const previous = current?.[current.length - 1];
+    const gap = previous ? caption.start - previous.end : 0;
+    const punctuationBreak = previous && /[.!?]$/.test(previous.text.trim());
+    if (!current || current.length >= 4 || gap > 0.48 || punctuationBreak) groups.push([caption]);
+    else current.push(caption);
+  }
+  const activeWord = captions[activeIndex];
+  const activeGroup = groups.find((group) => group.includes(activeWord)) || [activeWord];
+  const progress = Math.max(0, Math.min(1, (seconds - activeWord.start) / Math.max(0.04, activeWord.end - activeWord.start)));
+  const pop = 1 + Math.sin(Math.min(1, progress * 3) * Math.PI) * 0.09;
+  const isTop = position === "top";
+  const isBottom = position === "bottom";
+  const y = isTop ? Math.round(height * 0.12) : Math.round(height * 0.5);
+  const palette = style === "karaoke"
+    ? { active: "#FDE047", inactive: "#FFFFFF", background: "rgba(0,0,0,0.58)" }
+    : style === "bold"
+      ? { active: "#FFFFFF", inactive: "#FFFFFF", background: "rgba(0,0,0,0.68)" }
+      : { active: "#FDE047", inactive: "#FFFFFF", background: "transparent" };
 
   return (
     <div style={{
-      position: "absolute",
-      left: 64,
-      right: 64,
-      bottom: 230,
-      display: "flex",
-      justifyContent: "center",
-      textAlign: "center",
-      fontFamily: "Arial, sans-serif",
-      fontSize: 58,
-      fontWeight: 900,
-      lineHeight: 1.12,
-      color: "#ffffff",
-      textShadow: "0 3px 12px rgba(0,0,0,0.95)",
-      background: "rgba(0,0,0,0.35)",
-      borderRadius: 18,
-      padding: "18px 24px",
+      position: "absolute", left: "6%", right: "6%",
+      top: isTop || position === "center" ? y : undefined,
+      bottom: isBottom ? Math.round(height * 0.12) : undefined,
+      transform: position === "center" ? "translateY(-50%)" : undefined,
+      display: "flex", justifyContent: "center", flexWrap: "wrap",
+      gap: "0.22em", textAlign: "center",
+      fontFamily: "Arial, sans-serif", fontSize: "clamp(30px, 5.4vw, 68px)",
+      fontWeight: 900, lineHeight: 1.16,
+      letterSpacing: style === "minimal" ? "0.01em" : "-0.025em",
+      color: "#fff", textShadow: "0 3px 14px rgba(0,0,0,0.95)",
+      background: palette.background, borderRadius: style === "minimal" ? 0 : 16,
+      padding: style === "minimal" ? "8px 4px" : "14px 20px",
     }}>
-      {active.text}
+      {activeGroup.map((word, index) => {
+        const isActive = word === activeWord;
+        return <span key={word.start + "-" + index} style={{
+          color: isActive ? palette.active : palette.inactive,
+          display: "inline-block",
+          transform: isActive ? `scale(${pop})` : "scale(1)",
+          WebkitTextStroke: style === "minimal" ? "0.5px rgba(0,0,0,0.8)" : undefined,
+        }}>{word.text}</span>;
+      })}
     </div>
   );
 };
 
 const ClipForgeComposition: React.FC<ClipForgeProps> = ({
-  captions, focusKeyframes, sourceWidth, sourceHeight,
+  captions, focusKeyframes, sourceWidth, sourceHeight, captionStyle, captionPosition,
 }) => {
   const frame = useCurrentFrame();
   const { fps, width, height } = useVideoConfig();
@@ -117,7 +150,7 @@ const ClipForgeComposition: React.FC<ClipForgeProps> = ({
         src={staticFile("clip.mp4")}
         style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition }}
       />
-      <CaptionOverlay captions={captions} />
+      <CaptionOverlay captions={captions} style={captionStyle} position={captionPosition} />
     </AbsoluteFill>
   );
 };
@@ -130,7 +163,7 @@ export const RemotionRoot: React.FC = () => (
     fps={30}
     width={1080}
     height={1920}
-    defaultProps={{ durationSeconds: 5, captions: [], aspectRatio: "9:16", focusKeyframes: [], sourceWidth: 0, sourceHeight: 0 }}
+    defaultProps={{ durationSeconds: 5, captions: [], aspectRatio: "9:16", focusKeyframes: [], sourceWidth: 0, sourceHeight: 0, captionStyle: "karaoke", captionPosition: "bottom" }}
     calculateMetadata={({ props }) => {
       const dimensions = props.aspectRatio === "16:9" ? { width: 1920, height: 1080 }
         : props.aspectRatio === "1:1" ? { width: 1080, height: 1080 }
