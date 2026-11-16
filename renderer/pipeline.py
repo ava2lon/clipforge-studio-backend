@@ -171,6 +171,71 @@ def _aspect_dimensions(aspect_ratio: str) -> tuple[int, int]:
         raise PipelineError("Aspect ratio must be one of 9:16, 1:1, or 16:9") from exc
 
 
+
+def _smooth_focus_keyframes(points: list[dict[str, float]], radius: int = 2) -> list[dict[str, float]]:
+    """Smooth normalized face-center coordinates without changing timestamps."""
+    if not points:
+        return []
+    ordered = sorted(points, key=lambda item: item["time"])
+    smoothed = []
+    for index, point in enumerate(ordered):
+        neighbors = ordered[max(0, index-radius):index+radius+1]
+        smoothed.append({
+            "time": round(float(point["time"]), 3),
+            "x": round(sum(float(p["x"]) for p in neighbors) / len(neighbors), 4),
+            "y": round(sum(float(p["y"]) for p in neighbors) / len(neighbors), 4),
+        })
+    return smoothed
+
+
+def _face_focus_keyframes(source: Path, duration: float, sample_limit: int = 600) -> list[dict[str, float]]:
+    """Sample frames and track the largest detected face; return [] for center-crop fallback."""
+    if duration <= 0:
+        return []
+    try:
+        import cv2
+        capture = cv2.VideoCapture(str(source))
+        if not capture.isOpened():
+            capture.release()
+            return []
+        try:
+            cascade_path = str(Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml")
+            detector = cv2.CascadeClassifier(cascade_path)
+            if detector.empty():
+                return []
+            interval = max(1.0, duration / max(1, sample_limit - 1))
+            points: list[dict[str, float]] = []
+            sample_time = 0.0
+            while sample_time < duration and len(points) < sample_limit:
+                capture.set(cv2.CAP_PROP_POS_MSEC, sample_time * 1000.0)
+                ok, frame = capture.read()
+                if ok and frame is not None and frame.size:
+                    height, width = frame.shape[:2]
+                    if width > 640:
+                        scale = 640.0 / width
+                        frame = cv2.resize(frame, (640, max(1, int(height * scale))))
+                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    faces = detector.detectMultiScale(
+                        gray, scaleFactor=1.1, minNeighbors=5, minSize=(24, 24)
+                    )
+                    if len(faces):
+                        x, y, face_width, face_height = max(
+                            faces, key=lambda box: int(box[2]) * int(box[3])
+                        )
+                        frame_height, frame_width = gray.shape[:2]
+                        points.append({
+                            "time": sample_time,
+                            "x": min(1.0, max(0.0, (float(x) + float(face_width) / 2) / frame_width)),
+                            "y": min(1.0, max(0.0, (float(y) + float(face_height) / 2) / frame_height)),
+                        })
+                sample_time += interval
+            return _smooth_focus_keyframes(points)
+        finally:
+            capture.release()
+    except Exception:
+        # Face tracking is an enhancement; render remains available with a centered crop.
+        return []
+
 def _render_with_remotion(source: Path, output: Path, duration: float,
                           captions: list[dict[str, Any]], aspect_ratio: str = "9:16") -> Path:
     # Remotion's public/clip.mp4, props file and output path are shared by all workers.
@@ -188,7 +253,7 @@ def _render_with_remotion(source: Path, output: Path, duration: float,
         rendered = render_dir / "clipforge.mp4"
         try:
             shutil.copy2(source, public_media)
-            props_path.write_text(json.dumps({"durationSeconds": duration, "captions": captions, "aspectRatio": aspect_ratio}),
+            props_path.write_text(json.dumps({"durationSeconds": duration, "captions": captions, "aspectRatio": aspect_ratio,\n                                              "focusKeyframes": focus_keyframes or [],\n                                              "sourceWidth": source_width, "sourceHeight": source_height}),
                                   encoding="utf-8")
             rendered.unlink(missing_ok=True)
             proc = subprocess.run(
