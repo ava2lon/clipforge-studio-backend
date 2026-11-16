@@ -97,7 +97,7 @@ def test_edit_render_trims_shifts_captions_and_marks_complete(tmp_path, monkeypa
     def fake_render(source, output, duration, captions, *args):
         captured["duration"] = duration
         captured["captions"] = captions
-        captured["focus"] = args[2]
+        captured["focus"] = args[1]
         output.write_bytes(b"rendered-mp4")
         return output
 
