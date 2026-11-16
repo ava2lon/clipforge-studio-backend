@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, HttpUrl
 from renderer.capabilities import collect_capabilities
 from renderer.jobs import (
     clip_edit_artifact, create_clip_edit, create_job, get_clip_edit, list_clip_edits,
-    get_job, job_artifact, render_clip_edit,
+    get_job, job_artifact, render_clip_edit, runtime_metrics,
 )
 from renderer.ingestion import SourceAccessRequired, ensure_supported_ingestion_source
 from renderer.security import is_allowed_supabase_storage_url
@@ -115,6 +115,15 @@ def health() -> dict[str, str]:
 @app.get("/capabilities")
 def capabilities() -> dict[str, Any]:
     return collect_capabilities()
+
+
+@app.get("/metrics")
+def metrics(x_api_key: str | None = Header(default=None)) -> dict[str, Any]:
+    _authorize(x_api_key)
+    try:
+        return runtime_metrics()
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="Runtime storage metrics are unavailable") from exc
 
 
 @app.post("/clips", status_code=202)
