@@ -304,8 +304,24 @@ def _render_with_remotion(source: Path, output: Path, duration: float,
         render_dir = project / "out"
         render_dir.mkdir(parents=True, exist_ok=True)
         rendered = render_dir / "clipforge.mp4"
+        broll_dir = public_dir / "broll"
+        copied_broll: list[Path] = []
         try:
             shutil.copy2(source, public_media)
+            broll_props = []
+            for overlay_index, overlay in enumerate(broll_placements or []):
+                asset_path = Path(overlay["path"])
+                if not asset_path.is_file():
+                    continue
+                broll_dir.mkdir(parents=True, exist_ok=True)
+                public_asset = broll_dir / f"asset-{overlay_index}.mp4"
+                shutil.copy2(asset_path, public_asset)
+                copied_broll.append(public_asset)
+                broll_props.append({
+                    "src": f"broll/{public_asset.name}",
+                    "startSeconds": overlay["start"],
+                    "durationSeconds": overlay["duration"],
+                })
             props_path.write_text(json.dumps({
                 "durationSeconds": duration,
                 "captions": captions,
@@ -317,6 +333,7 @@ def _render_with_remotion(source: Path, output: Path, duration: float,
                 "captionPosition": caption_position,
                 "transition": transition,
                 "transitionDurationSeconds": transition_duration,
+                "brollOverlays": broll_props,
             }),
                                   encoding="utf-8")
             rendered.unlink(missing_ok=True)
@@ -332,6 +349,13 @@ def _render_with_remotion(source: Path, output: Path, duration: float,
             return output
         finally:
             public_media.unlink(missing_ok=True)
+            for asset_path in copied_broll:
+                asset_path.unlink(missing_ok=True)
+            if broll_dir.exists():
+                try:
+                    broll_dir.rmdir()
+                except OSError:
+                    pass
             props_path.unlink(missing_ok=True)
             rendered.unlink(missing_ok=True)
 
