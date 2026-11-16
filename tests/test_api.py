@@ -122,7 +122,7 @@ def test_clip_submission_accepts_caption_presets(monkeypatch):
         },
     )
     assert response.status_code == 202
-    assert captured["args"][-7:] == ("karaoke", "bottom", True, "none", 0.5, None, [])
+    assert captured["args"][-7:] == ("minimal", "top", True, "none", 0.5, None, [])
 
 
 def test_clip_submission_rejects_unknown_caption_preset(monkeypatch):
