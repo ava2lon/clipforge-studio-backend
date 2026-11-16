@@ -226,7 +226,7 @@ def _candidate_score(text: str, start: float, end: float, scenes: list[float],
     hook = min(20.0, sum(bool(re.search(x, text, re.I)) for x in hook_patterns) * 8.0)
     weak_open = bool(re.match(r"^(and|but|so|because|then|they|he|she|it|this|that)\b", " ".join(tokens[:8])))
     context = max(0.0, (15.0 if len(tokens) >= 12 else 9.0) - (5.0 if weak_open else 0.0))
-    ending = 8.0 + (3.0 if re.search(r"[.!?][\\"'”’)]*$", text.strip()) else 0.0)
+    ending = 8.0 + (3.0 if text.strip().endswith((".", "?", "!")) else 0.0)
     if re.search(r"\b(therefore|that'?s why|in conclusion|the point is|so remember)\b", text, re.I):
         ending += 4.0
     if re.search(r"\b(and then|but anyway|to be continued)\s*$", text, re.I):
