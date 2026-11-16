@@ -85,20 +85,20 @@ class _SupabaseRedirectHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def _download(url: str, target: Path) -> None:
+def _download(url: str, target: Path, max_bytes: int = _MAX_DOWNLOAD_BYTES) -> None:
     if not is_allowed_supabase_storage_url(url):
         source_type = ensure_supported_ingestion_source(url)
         if source_type in {"youtube", "tiktok", "facebook", "instagram"}:
-            download_social_video(url, target, _MAX_DOWNLOAD_BYTES)
+            download_social_video(url, target, max_bytes)
         else:
-            download_direct_mp4(url, target, _MAX_DOWNLOAD_BYTES)
+            download_direct_mp4(url, target, max_bytes)
         return
     request = urllib.request.Request(url, headers={"User-Agent": "ClipForge-Studio/0.2"})
     total = 0
     opener = urllib.request.build_opener(_SupabaseRedirectHandler())
     with opener.open(request, timeout=60) as response, target.open("wb") as output:
         content_length = response.headers.get("Content-Length")
-        if content_length and int(content_length) > _MAX_DOWNLOAD_BYTES:
+        if content_length and int(content_length) > max_bytes:
             raise PipelineError("Source exceeds configured maximum source size")
         content_type = response.headers.get("Content-Type", "")
         if not (content_type.startswith("video/") or content_type.startswith("application/octet-stream")):
@@ -108,7 +108,7 @@ def _download(url: str, target: Path) -> None:
             if not chunk:
                 break
             total += len(chunk)
-            if total > _MAX_DOWNLOAD_BYTES:
+            if total > max_bytes:
                 raise PipelineError("Source exceeds configured maximum source size")
             output.write(chunk)
     if total == 0:
@@ -173,7 +173,7 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
                 target = broll_dir / f"asset-{asset_index:02d}.mp4"
                 if not target.is_file() or target.stat().st_size == 0:
                     partial = target.with_suffix(".part")
-                    _download(str(asset["url"]), partial)
+                    _download(str(asset["url"]), partial, 50_000_000)
                     if partial.stat().st_size > 50_000_000:
                         partial.unlink(missing_ok=True)
                         raise PipelineError("Each B-roll asset must be 50MB or smaller")
