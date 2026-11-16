@@ -91,3 +91,25 @@ def test_aspect_dimensions_rejects_unsupported_format():
     from renderer.pipeline import PipelineError, _aspect_dimensions
     with pytest.raises(PipelineError):
         _aspect_dimensions("4:5")
+
+
+
+def test_focus_keyframes_are_smoothed_and_keep_timestamps():
+    from renderer.pipeline import _smooth_focus_keyframes
+
+    points = [
+        {"time": 0.0, "x": 0.2, "y": 0.4},
+        {"time": 1.0, "x": 0.8, "y": 0.6},
+        {"time": 2.0, "x": 0.4, "y": 0.8},
+    ]
+    result = _smooth_focus_keyframes(points, radius=1)
+    assert [item["time"] for item in result] == [0.0, 1.0, 2.0]
+    assert result[0]["x"] == 0.5
+    assert result[1]["x"] == 0.4667
+    assert result[2]["y"] == 0.7
+
+
+def test_focus_keyframes_empty_input_uses_center_fallback():
+    from renderer.pipeline import _smooth_focus_keyframes
+
+    assert _smooth_focus_keyframes([]) == []
