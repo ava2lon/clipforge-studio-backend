@@ -198,53 +198,97 @@ def _render_with_remotion(source: Path, output: Path, duration: float,
             props_path.unlink(missing_ok=True)
             rendered.unlink(missing_ok=True)
 
+def _prompt_tokens(prompt: str | None) -> set[str]:
+    if not prompt:
+        return set()
+    stop = {"a", "an", "and", "are", "as", "at", "be", "best", "clip", "clips",
+            "find", "for", "from", "in", "into", "is", "it", "me", "of", "on",
+            "or", "please", "show", "that", "the", "this", "to", "video", "with"}
+    return {token.lower() for token in re.findall(r"[\\w']+", prompt)
+            if len(token) > 2 and token.lower() not in stop}
+
+
+def _candidate_score(text: str, start: float, end: float, scenes: list[float],
+                     active_ranges: list[tuple[float, float]], prompt_terms: set[str]):
+    tokens = [token.lower() for token in re.findall(r"[\\w']+", text)]
+    density = len(tokens) / max(end - start, 1.0)
+    speech = min(20.0, density / 3.0 * 20.0)
+    hook_patterns = (r"\\?", r"\\b(how|why|secret|mistake|never|stop|truth|surprising|shocking|imagine|watch|listen)\\b",
+                     r"\\b(you won'?t believe|this is what|the biggest|the most important)\\b")
+    hook = min(20.0, sum(bool(re.search(x, text, re.I)) for x in hook_patterns) * 8.0)
+    weak_open = bool(re.match(r"^(and|but|so|because|then|they|he|she|it|this|that)\\b", " ".join(tokens[:8])))
+    context = max(0.0, (15.0 if len(tokens) >= 12 else 9.0) - (5.0 if weak_open else 0.0))
+    ending = 8.0 + (3.0 if re.search(r"[.!?][\\\"'”’)]*$", text.strip()) else 0.0)
+    if re.search(r"\\b(therefore|that'?s why|in conclusion|the point is|so remember)\\b", text, re.I):
+        ending += 4.0
+    if re.search(r"\\b(and then|but anyway|to be continued)\\s*$", text, re.I):
+        ending -= 4.0
+    ending = max(0.0, min(15.0, ending))
+    scene = 10.0 if any(abs(point - start) <= 2.0 for point in scenes) else 0.0
+    audio = 5.0 if not active_ranges else _active_ratio(start, end, active_ranges) * 10.0
+    matched = set(tokens).intersection(prompt_terms)
+    relevance = min(10.0, 10.0 * len(matched) / max(1, len(prompt_terms))) if prompt_terms else 5.0
+    factors = {"speech_density": round(speech, 2), "hook_strength": round(hook, 2),
+               "context_completeness": round(context, 2), "ending_strength": round(ending, 2),
+               "scene_alignment": round(scene, 2), "audio_activity": round(audio, 2),
+               "prompt_relevance": round(relevance, 2)}
+    score = round(sum(factors.values()), 1)
+    reasons = [name.replace("_", " ") for name, value in factors.items() if value >= 7.0]
+    match_ratio = len(matched) / max(1, len(prompt_terms)) if prompt_terms else 1.0
+    return score, factors, reasons, match_ratio
+
+
 def _rank_candidates(segments: list[dict[str, Any]], scenes: list[float],
-                     duration: float, active_ranges: list[tuple[float, float]] | None = None) -> list[dict[str, Any]]:
+                     duration: float, active_ranges: list[tuple[float, float]] | None = None,
+                     prompt: str | None = None) -> list[dict[str, Any]]:
     min_len = float(os.getenv("CLIP_MIN_SECONDS", "20"))
     max_len = float(os.getenv("CLIP_MAX_SECONDS", "60"))
-    max_clips = int(os.getenv("CLIP_MAX_COUNT", "8"))
+    max_clips = max(1, int(os.getenv("CLIP_MAX_COUNT", "8")))
+    if min_len <= 0 or max_len < min_len or duration <= 0:
+        return []
+    prompt_terms = _prompt_tokens(prompt)
     words = []
     for seg in segments:
-        tokens = re.findall(r"[\w']+", seg["text"])
-        if tokens:
+        tokens = re.findall(r"[\\w']+", str(seg.get("text", "")))
+        if tokens and float(seg.get("end", 0)) > float(seg.get("start", 0)):
             words.append({**seg, "tokens": tokens})
+    words.sort(key=lambda x: (float(x["start"]), float(x["end"])))
     candidates = []
     for left in range(len(words)):
-        start = max(0.0, words[left]["start"] - 1.0)
+        start = max(0.0, float(words[left]["start"]) - 1.0)
         text_parts = []
-        last_end = start
         for right in range(left, len(words)):
-            seg = words[right]
-            if seg["end"] - start > max_len:
+            segment = words[right]
+            if float(segment["end"]) - start > max_len:
                 break
-            text_parts.append(seg["text"])
-            last_end = seg["end"]
-            span = last_end - start
-            if span < min_len:
+            text_parts.append(str(segment["text"]))
+            end = min(duration, float(segment["end"]) + 0.8, start + max_len)
+            if end - start < min_len:
                 continue
             text = " ".join(text_parts).strip()
-            count = sum(len(re.findall(r"[\w']+", part)) for part in text_parts)
-            density = count / max(span, 1)
-            hook = 1.0 if re.search(r"\?|\b(how|why|secret|mistake|never|best|worst|truth)\b", text, re.I) else 0.0
-            scene_bonus = 0.15 if any(abs(point-start) <= 2 for point in scenes) else 0.0
-            end = min(duration, last_end + 0.8, start + max_len)
-            active_ratio = _active_ratio(start, end, active_ranges or [])
-            score = (min(1.0, density / 3.0) * 0.55 + hook * 0.2
-                     + scene_bonus * 0.1 + active_ratio * 0.15)
+            score, factors, reasons, match_ratio = _candidate_score(
+                text, start, end, scenes, active_ranges or [], prompt_terms)
+            if prompt_terms and match_ratio == 0:
+                continue
             caption_items = []
             for part in words[left:right + 1]:
-                part_words = part.get("words") or [{"start": part["start"], "end": part["end"], "text": part["text"]}]
+                part_words = part.get("words") or [
+                    {"start": part["start"], "end": part["end"], "text": part["text"]}]
                 for word in part_words:
-                    if word["end"] > start and word["start"] < end:
-                        caption_items.append({"start": max(0.0, round(word["start"] - start, 3)),
-                                              "end": max(0.0, round(min(end, word["end"]) - start, 3)),
-                                              "text": word["text"]})
+                    if word.get("start") is None or word.get("end") is None:
+                        continue
+                    ws, we = float(word["start"]), float(word["end"])
+                    if we > start and ws < end:
+                        caption_items.append({"start": round(max(0.0, ws-start), 3),
+                                              "end": round(max(0.0, min(end, we)-start), 3),
+                                              "text": str(word["text"])})
             candidates.append({"start": round(start, 3), "end": round(end, 3),
-                               "duration": round(end-start, 2),
-                               "score": round(score, 4), "active_ratio": round(active_ratio, 3),
-                               "transcript": text[:3000], "captions": caption_items})
-            break
-    candidates.sort(key=lambda item: item["score"], reverse=True)
+                "duration": round(end-start, 2), "score": score, "virality_score": score,
+                "score_factors": factors, "score_reasons": reasons,
+                "prompt_match": round(match_ratio, 3),
+                "active_ratio": round(_active_ratio(start, end, active_ranges or []), 3),
+                "transcript": text[:3000], "captions": caption_items})
+    candidates.sort(key=lambda x: (-x["score"], x["start"], x["end"]))
     selected = []
     for candidate in candidates:
         if any(candidate["start"] < item["end"] and candidate["end"] > item["start"] for item in selected):
@@ -252,11 +296,11 @@ def _rank_candidates(segments: list[dict[str, Any]], scenes: list[float],
         selected.append(candidate)
         if len(selected) >= max_clips:
             break
-    return sorted(selected, key=lambda item: item["start"])
-
+    return sorted(selected, key=lambda x: x["start"])
 
 def analyze_and_extract(source: Path, output_dir: Path, media: dict[str, Any],
-                        progress: Callable[[int, str], None] = lambda *_: None) -> list[dict[str, Any]]:
+                        progress: Callable[[int, str], None] = lambda *_: None,
+                        clip_prompt: str | None = None) -> list[dict[str, Any]]:
     duration = float(media.get("format", {}).get("duration", 0))
     if duration <= 0:
         raise PipelineError("Media duration is missing or invalid")
@@ -273,8 +317,8 @@ def analyze_and_extract(source: Path, output_dir: Path, media: dict[str, Any],
     segments = _transcribe(source)
     if not segments:
         raise PipelineError("WhisperX found no usable speech segments")
-    progress(72, "Ranking transcript-led clip candidates")
-    candidates = _rank_candidates(segments, scenes, duration, active_ranges)
+    progress(72, "Ranking explainable clip candidates")
+    candidates = _rank_candidates(segments, scenes, duration, active_ranges, clip_prompt)
     if not candidates:
         raise PipelineError("No candidate segments fit the configured clip duration range")
     results = []
