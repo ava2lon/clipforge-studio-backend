@@ -92,7 +92,7 @@ jobs:
           curl --fail --silent --show-error --max-time 600 \
             -H "X-API-Key: $API_KEY" "$BASE_URL/download/$JOB_ID" -o /tmp/clips.zip
           python - <<'PY'
-          import json, zipfile
+          import json, subprocess, zipfile
           from pathlib import Path
           archive = zipfile.ZipFile("/tmp/clips.zip")
           names = archive.namelist()
@@ -101,13 +101,41 @@ jobs:
           assert "clipforge_manifest.json" in names, f"Manifest missing: {names}"
           manifest = json.loads(archive.read("clipforge_manifest.json"))
           assert manifest.get("clips"), "Manifest contains no clip records"
-          for name in clips:
+          assert len(clips) == len(manifest["clips"]), "MP4 count does not match manifest"
+          validation_dir = Path("/tmp/clipforge-e2e")
+          validation_dir.mkdir(parents=True, exist_ok=True)
+          media_checks = []
+          for index, name in enumerate(clips):
               info = archive.getinfo(name)
               assert info.file_size > 0, f"Empty artifact: {name}"
+              path = validation_dir / f"clip-{index:02d}.mp4"
+              path.write_bytes(archive.read(name))
+              result = subprocess.run(
+                  ["ffprobe", "-v", "error", "-show_entries",
+                   "format=duration:stream=codec_type,codec_name,width,height",
+                   "-of", "json", str(path)],
+                  capture_output=True, text=True, timeout=30,
+              )
+              assert result.returncode == 0, f"FFprobe rejected {name}: {result.stderr}"
+              metadata = json.loads(result.stdout)
+              assert any(s.get("codec_type") == "video" for s in metadata.get("streams", [])), f"No video stream: {name}"
+              duration = float(metadata.get("format", {}).get("duration", 0))
+              assert duration > 0, f"Invalid duration: {name}"
+              media_checks.append({"file": name, "bytes": info.file_size, "duration_seconds": duration,
+                                   "streams": metadata.get("streams", [])})
           print(json.dumps({
               "archive_bytes": Path("/tmp/clips.zip").stat().st_size,
               "clip_files": clips,
               "manifest_clip_count": len(manifest["clips"]),
+              "media_checks": media_checks,
               "analysis": manifest.get("analysis"),
           }, indent=2))
           PY
+
+      - name: Preserve rendered ZIP for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: clipforge-real-media-e2e-${{ github.run_id }}
+          path: /tmp/clips.zip
+          if-no-files-found: error
+          retention-days: 7
