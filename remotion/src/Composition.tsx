@@ -13,7 +13,7 @@ type Caption = { start: number; end: number; text: string };
 type CaptionStyle = "karaoke" | "bold" | "minimal";
 type CaptionPosition = "top" | "center" | "bottom";
 type FocusKeyframe = { time: number; x: number; y: number };
-type ClipForgeProps = {
+type BrollOverlay = { src: string; startSeconds: number; durationSeconds: number };\ntype ClipForgeProps = {
   durationSeconds: number;
   captions: Caption[];
   aspectRatio: "9:16" | "1:1" | "16:9";
@@ -139,6 +139,32 @@ const CaptionOverlay: React.FC<{
   );
 };
 
+
+const BrollOverlayLayer: React.FC<{ overlays: BrollOverlay[] }> = ({ overlays }) => {
+  const { fps, durationInFrames } = useVideoConfig();
+  return (
+    <>
+      {overlays.map((overlay, index) => {
+        const from = Math.max(0, Math.round(overlay.startSeconds * fps));
+        const durationInFramesForOverlay = Math.max(1, Math.min(
+          Math.round(overlay.durationSeconds * fps),
+          durationInFrames - from,
+        ));
+        if (durationInFramesForOverlay <= 0) return null;
+        return (
+          <Sequence key={overlay.src + "-" + index} from={from} durationInFrames={durationInFramesForOverlay}>
+            <OffthreadVideo
+              src={staticFile(overlay.src)}
+              volume={0}
+              style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 50%" }}
+            />
+          </Sequence>
+        );
+      })}
+    </>
+  );
+};
+
 const ClipForgeComposition: React.FC<ClipForgeProps> = ({
   captions, focusKeyframes, sourceWidth, sourceHeight, captionStyle, captionPosition,
   transition, transitionDurationSeconds,
@@ -160,7 +186,7 @@ const ClipForgeComposition: React.FC<ClipForgeProps> = ({
         volume={fadeOpacity}
         style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition }}
       />
-      <CaptionOverlay captions={captions} style={captionStyle} position={captionPosition} />
+      <BrollOverlayLayer overlays={brollOverlays || []} />\n      <CaptionOverlay captions={captions} style={captionStyle} position={captionPosition} />
     </AbsoluteFill>
   );
 };
@@ -173,7 +199,7 @@ export const RemotionRoot: React.FC = () => (
     fps={30}
     width={1080}
     height={1920}
-    defaultProps={{ durationSeconds: 5, captions: [], aspectRatio: "9:16", focusKeyframes: [], sourceWidth: 0, sourceHeight: 0, captionStyle: "karaoke", captionPosition: "bottom", transition: "none", transitionDurationSeconds: 0.5 }}
+    defaultProps={{ durationSeconds: 5, captions: [], aspectRatio: "9:16", focusKeyframes: [], sourceWidth: 0, sourceHeight: 0, captionStyle: "karaoke", captionPosition: "bottom", transition: "none", transitionDurationSeconds: 0.5, brollOverlays: [] }}
     calculateMetadata={({ props }) => {
       const dimensions = props.aspectRatio === "16:9" ? { width: 1920, height: 1080 }
         : props.aspectRatio === "1:1" ? { width: 1080, height: 1080 }
