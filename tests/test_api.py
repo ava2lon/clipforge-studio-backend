@@ -41,7 +41,7 @@ def test_clip_submission_requires_authorized_social_source(monkeypatch):
         json={"media": "https://www.youtube.com/watch?v=abc123"},
     )
     assert response.status_code == 422
-    assert "authorized provider API" in response.json()["detail"]
+    assert "approved provider API" in response.json()["detail"]
 
 
 
