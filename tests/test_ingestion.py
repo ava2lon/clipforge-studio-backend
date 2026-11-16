@@ -214,7 +214,7 @@ def test_yt_dlp_downloads_public_video_without_cookies(monkeypatch, tmp_path):
         calls["command"] = command
         calls["kwargs"] = kwargs
         output = tmp_path / "source.media.mp4"
-        output.write_bytes(b"\x00\x00\x00\\x18ftypmp42video")
+        output.write_bytes(b"\x00\x00\x00\x18ftypmp42video")
         class Result:
             returncode = 0
         return Result()
