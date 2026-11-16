@@ -237,7 +237,9 @@ def _face_focus_keyframes(source: Path, duration: float, sample_limit: int = 600
         return []
 
 def _render_with_remotion(source: Path, output: Path, duration: float,
-                          captions: list[dict[str, Any]], aspect_ratio: str = "9:16") -> Path:
+                          captions: list[dict[str, Any]], aspect_ratio: str = "9:16",
+                          focus_keyframes: list[dict[str, float]] | None = None,
+                          source_width: int = 0, source_height: int = 0) -> Path:
     # Remotion's public/clip.mp4, props file and output path are shared by all workers.
     with _REMOTION_LOCK:
         project = Path(__file__).resolve().parents[1] / "remotion"
@@ -399,8 +401,11 @@ def analyze_and_extract(source: Path, output_dir: Path, media: dict[str, Any],
     for index, candidate in enumerate(candidates, 1):
         name = f"clip-{index:02d}.mp4"
         raw_path = extract_clip(source, output_dir / f"raw-{name}", candidate["start"], candidate["end"])
+        video_stream = next(stream for stream in streams if stream.get("codec_type") == "video")
+        focus_keyframes = _face_focus_keyframes(raw_path, candidate["duration"])
         path = _render_with_remotion(raw_path, output_dir / name, candidate["duration"],
-                                     candidate.get("captions", []), aspect_ratio)
+                                     candidate.get("captions", []), aspect_ratio, focus_keyframes,
+                                     int(video_stream.get("width", 0)), int(video_stream.get("height", 0)))
         raw_path.unlink(missing_ok=True)
         results.append({**candidate, "name": name, "path": str(path),
                         "scene_detection": "PySceneDetect",
