@@ -145,3 +145,26 @@ def test_source_duration_ceiling_rejects_over_quota_media_before_analysis(tmp_pa
     assert state["state"] == "FAILED"
     assert "exceeds the remaining plan allocation" in state["failure_reason"]
     assert state["metrics"]["source_duration_seconds"] == 42.0
+
+
+
+def test_retry_rejects_quota_managed_job_without_new_reservation(tmp_path, monkeypatch):
+    workdir = tmp_path / "work"
+    job_id = "a" * 32
+    job_dir = workdir / job_id
+    job_dir.mkdir(parents=True)
+    (job_dir / "source.media").write_bytes(b"staged-source")
+    (job_dir / "clipforge-options.json").write_text(
+        json.dumps({"quota_managed": True, "broll_assets": []}),
+        encoding="utf-8",
+    )
+    store = JobStore(tmp_path / "jobs.sqlite3")
+    store.create(job_id, f"/download/{job_id}", max_active=3)
+    store.update(job_id, state="FAILED", failure_reason="temporary failure")
+
+    monkeypatch.setattr(jobs, "_WORKDIR", workdir)
+    monkeypatch.setattr(jobs, "_STORE", store)
+
+    import pytest
+    with pytest.raises(ValueError, match="resubmitted through ClipForge"):
+        jobs.retry_job(job_id)
