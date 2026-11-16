@@ -96,7 +96,7 @@ class _FakeConnection:
 
 
 def test_direct_mp4_download_streams_and_checks_signature(monkeypatch, tmp_path):
-    payload = b"\\x00\\x00\\x00\\x18ftypmp42" + b"video-data"
+    payload = b"\x00\x00\x00\x18ftypmp42" + b"video-data"
     response = _FakeResponse([payload[:5], payload[5:]])
     monkeypatch.setattr(
         ingestion, "_validated_https_target",
@@ -128,7 +128,7 @@ def test_direct_mp4_download_rejects_non_mp4_and_cleans_partial(monkeypatch, tmp
 
 
 def test_direct_mp4_download_enforces_streaming_byte_limit(monkeypatch, tmp_path):
-    payload = b"\\x00\\x00\\x00\\x18ftypmp42" + b"x" * 40
+    payload = b"\x00\x00\x00\x18ftypmp42" + b"x" * 40
     response = _FakeResponse([payload])
     monkeypatch.setattr(
         ingestion, "_validated_https_target",
