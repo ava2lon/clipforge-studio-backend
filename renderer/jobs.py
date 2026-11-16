@@ -92,6 +92,8 @@ def retry_job(job_id: str) -> dict[str, Any]:
     if options_path.is_file():
         try:
             options = json.loads(options_path.read_text(encoding="utf-8"))
+            if options.get("quota_managed") is True:
+                raise ValueError("Quota-managed jobs must be resubmitted through ClipForge so usage can be reserved again")
             for asset in options.get("broll_assets", []):
                 filename = asset.get("filename")
                 if not isinstance(filename, str) or not re.fullmatch(r"asset-[0-9]{2}\.mp4", filename):
@@ -118,6 +120,7 @@ def create_job(url: str, workdir: Path, clip_prompt: str | None = None, aspect_r
                caption_style: str = "karaoke", caption_position: str = "bottom", audio_cleanup: bool = True,
                transition: str = "none", transition_duration: float = 0.5,
                max_source_duration_seconds: float | None = None,
+               quota_managed: bool = False,
                broll_assets: list[dict[str, Any]] | None = None) -> str:
     job_id = uuid.uuid4().hex
     job_dir = workdir / job_id
@@ -133,6 +136,7 @@ def create_job(url: str, workdir: Path, clip_prompt: str | None = None, aspect_r
             "transition": transition,
             "transition_duration": transition_duration,
             "max_source_duration_seconds": max_source_duration_seconds,
+            "quota_managed": bool(quota_managed),
             "broll_assets": [
                 {"filename": f"asset-{index:02d}.mp4", "keywords": asset.get("keywords", [])}
                 for index, asset in enumerate(broll_assets or [], 1)
