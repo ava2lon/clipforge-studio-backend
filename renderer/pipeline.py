@@ -163,8 +163,16 @@ def _active_ratio(start: float, end: float, ranges: list[tuple[float, float]]) -
     return min(1.0, active / (end - start))
 
 
+def _aspect_dimensions(aspect_ratio: str) -> tuple[int, int]:
+    dimensions = {"9:16": (1080, 1920), "1:1": (1080, 1080), "16:9": (1920, 1080)}
+    try:
+        return dimensions[aspect_ratio]
+    except KeyError as exc:
+        raise PipelineError("Aspect ratio must be one of 9:16, 1:1, or 16:9") from exc
+
+
 def _render_with_remotion(source: Path, output: Path, duration: float,
-                          captions: list[dict[str, Any]]) -> Path:
+                          captions: list[dict[str, Any]], aspect_ratio: str = "9:16") -> Path:
     # Remotion's public/clip.mp4, props file and output path are shared by all workers.
     with _REMOTION_LOCK:
         project = Path(__file__).resolve().parents[1] / "remotion"
@@ -180,7 +188,7 @@ def _render_with_remotion(source: Path, output: Path, duration: float,
         rendered = render_dir / "clipforge.mp4"
         try:
             shutil.copy2(source, public_media)
-            props_path.write_text(json.dumps({"durationSeconds": duration, "captions": captions}),
+            props_path.write_text(json.dumps({"durationSeconds": duration, "captions": captions, "aspectRatio": aspect_ratio}),
                                   encoding="utf-8")
             rendered.unlink(missing_ok=True)
             proc = subprocess.run(
@@ -300,7 +308,8 @@ def _rank_candidates(segments: list[dict[str, Any]], scenes: list[float],
 
 def analyze_and_extract(source: Path, output_dir: Path, media: dict[str, Any],
                         progress: Callable[[int, str], None] = lambda *_: None,
-                        clip_prompt: str | None = None) -> list[dict[str, Any]]:
+                        clip_prompt: str | None = None, aspect_ratio: str = "9:16") -> list[dict[str, Any]]:
+    _aspect_dimensions(aspect_ratio)
     duration = float(media.get("format", {}).get("duration", 0))
     if duration <= 0:
         raise PipelineError("Media duration is missing or invalid")
@@ -326,7 +335,7 @@ def analyze_and_extract(source: Path, output_dir: Path, media: dict[str, Any],
         name = f"clip-{index:02d}.mp4"
         raw_path = extract_clip(source, output_dir / f"raw-{name}", candidate["start"], candidate["end"])
         path = _render_with_remotion(raw_path, output_dir / name, candidate["duration"],
-                                     candidate.get("captions", []))
+                                     candidate.get("captions", []), aspect_ratio)
         raw_path.unlink(missing_ok=True)
         results.append({**candidate, "name": name, "path": str(path),
                         "scene_detection": "PySceneDetect",
