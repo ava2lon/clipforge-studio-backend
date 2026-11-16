@@ -122,7 +122,7 @@ def test_clip_submission_accepts_caption_presets(monkeypatch):
         },
     )
     assert response.status_code == 202
-    assert captured["args"][-5:] == ("minimal", "top", True, "none", 0.5)
+    assert captured["args"][-6:] == ("minimal", "top", True, "none", 0.5, [])
 
 
 def test_clip_submission_rejects_unknown_caption_preset(monkeypatch):
@@ -153,4 +153,47 @@ def test_clip_submission_can_disable_audio_cleanup(monkeypatch):
     )
     assert response.status_code == 202
     assert captured["args"][4] is False
-    assert captured["args"][-2:] == ("none", 0.5)
+    assert captured["args"][-3:] == ("none", 0.5, [])
+
+
+def test_clip_submission_accepts_signed_project_broll_assets(monkeypatch):
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    captured = {}
+
+    def fake_create_job(url, workdir, *args):
+        captured["args"] = args
+        return "e" * 32
+
+    monkeypatch.setattr("api.create_job", fake_create_job)
+    response = client.post(
+        "/clips",
+        headers={"X-API-Key": "test-secret"},
+        json={
+            "media": "https://cdn.example.net/video.mp4",
+            "broll_assets": [{
+                "url": "https://project.supabase.co/storage/v1/object/sign/source-ingestion-buffers/user/project/broll/a.mp4?token=test",
+                "keywords": ["office", "team"],
+            }],
+        },
+    )
+    assert response.status_code == 202, response.text
+    assert captured["args"][-1] == [{
+        "url": "https://project.supabase.co/storage/v1/object/sign/source-ingestion-buffers/user/project/broll/a.mp4?token=test",
+        "keywords": ["office", "team"],
+    }]
+
+
+def test_clip_submission_rejects_non_supabase_broll_url(monkeypatch):
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    response = client.post(
+        "/clips",
+        headers={"X-API-Key": "test-secret"},
+        json={
+            "media": "https://cdn.example.net/video.mp4",
+            "broll_assets": [{
+                "url": "https://attacker.example/broll.mp4",
+                "keywords": ["office"],
+            }],
+        },
+    )
+    assert response.status_code == 400
