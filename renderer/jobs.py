@@ -504,6 +504,44 @@ def _resume_interrupted_jobs() -> None:
             )
 
 
+def _resume_interrupted_edits() -> None:
+    """Resume queued edit renders after a process restart when the parent job is intact."""
+    for job_dir in _WORKDIR.iterdir():
+        if not job_dir.is_dir() or not re.fullmatch(r"[a-f0-9]{32}", job_dir.name):
+            continue
+        parent = get_job(job_dir.name)
+        if not parent or parent.get("state") != "COMPLETED":
+            continue
+        for state_path in (job_dir / "edits").glob("*/edit.json"):
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+                if state.get("state") not in {"QUEUED", "RUNNING"}:
+                    continue
+                manifest = json.loads((job_dir / "clipforge_manifest.json").read_text(encoding="utf-8"))
+                clip = next((item for item in manifest.get("clips", [])
+                             if item.get("name") == state.get("clip_name")), None)
+                if not clip or not clip.get("editor_source"):
+                    raise PipelineError("Saved edit source is unavailable after restart")
+                source = (job_dir / "clips" / clip["editor_source"]).resolve()
+                source.relative_to(job_dir.resolve())
+                if not source.is_file():
+                    raise PipelineError("Saved edit source is unavailable after restart")
+                state["state"] = "QUEUED"
+                state["updated_at"] = time.time()
+                _write_edit_state(state_path, state)
+                _EXECUTOR.submit(_run_clip_edit, job_dir.name, state["edit_id"], job_dir)
+            except Exception as exc:
+                try:
+                    state = json.loads(state_path.read_text(encoding="utf-8"))
+                    state["state"] = "FAILED"
+                    state["failure_reason"] = ("Automatic edit recovery failed: " + str(exc))[:1000]
+                    state["updated_at"] = time.time()
+                    _write_edit_state(state_path, state)
+                except Exception:
+                    logging.exception("Could not persist failed edit recovery for %s", state_path)
+                logging.exception("Could not resume editor render %s", state_path)
+
+
 def _cleanup_expired_jobs() -> None:
     while True:
         try:
@@ -516,4 +554,5 @@ def _cleanup_expired_jobs() -> None:
 
 
 _resume_interrupted_jobs()
+_resume_interrupted_edits()
 threading.Thread(target=_cleanup_expired_jobs, name="clipforge-retention", daemon=True).start()
