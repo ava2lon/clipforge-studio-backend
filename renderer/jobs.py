@@ -57,7 +57,10 @@ def create_job(url: str, workdir: Path, clip_prompt: str | None = None, aspect_r
             "audio_cleanup": bool(audio_cleanup),
             "transition": transition,
             "transition_duration": transition_duration,
-            "broll_assets": broll_assets or [],
+            "broll_assets": [
+                {"filename": f"asset-{index:02d}.mp4", "keywords": asset.get("keywords", [])}
+                for index, asset in enumerate(broll_assets or [], 1)
+            ],
         }), encoding="utf-8")
         os.replace(options_tmp, job_dir / "clipforge-options.json")
         _STORE.create(job_id, f"/download/{job_id}", _MAX_ACTIVE_JOBS)
@@ -66,7 +69,7 @@ def create_job(url: str, workdir: Path, clip_prompt: str | None = None, aspect_r
         shutil.rmtree(job_dir, ignore_errors=True)
         raise
     try:
-        _EXECUTOR.submit(_run_job, job_id, url, job_dir)
+        _EXECUTOR.submit(_run_job, job_id, url, job_dir, broll_assets=broll_assets or [])
     except Exception as exc:
         _STORE.update(job_id, state="FAILED", failure_reason="Worker submission failed",
                       metrics={"progress": 100, "stage": "Worker unavailable"})
@@ -172,8 +175,11 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
             for asset_index, asset in enumerate(broll_assets[:3], 1):
                 target = broll_dir / f"asset-{asset_index:02d}.mp4"
                 if not target.is_file() or target.stat().st_size == 0:
+                    asset_url = asset.get("url")
+                    if not asset_url:
+                        raise PipelineError("A B-roll file was not fully staged before worker recovery; resubmit this job")
                     partial = target.with_suffix(".part")
-                    _download(str(asset["url"]), partial, 50_000_000)
+                    _download(str(asset_url), partial, 50_000_000)
                     if partial.stat().st_size > 50_000_000:
                         partial.unlink(missing_ok=True)
                         raise PipelineError("Each B-roll asset must be 50MB or smaller")
@@ -184,7 +190,7 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
                 asset_media = probe_media(target)
                 if not any(stream.get("codec_type") == "video" for stream in asset_media.get("streams", [])):
                     raise PipelineError("B-roll assets must contain a video stream")
-                staged_broll.append({"path": str(target), "keywords": asset.get("keywords", [])})
+                staged_broll.append({"path": str(target), "keywords": asset.get("keywords", []),\n                                     "duration": float(asset_media.get("format", {}).get("duration", 0))})
         media = probe_media(source)
         _set(job_id, metrics={"progress": 12, "stage": "Validating media"})
         clips_dir = job_dir / "clips"
