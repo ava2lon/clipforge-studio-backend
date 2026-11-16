@@ -24,7 +24,7 @@ Docker-based video processing API for the ClipForge frontend. This repository is
 
 - Authenticated FastAPI endpoints matching the current frontend contract: `POST /clips`, `GET /status/{job_id}`, and `GET /download/{job_id}`.
 - HTTPS Supabase signed-URL ingestion plus direct public HTTPS MP4 ingestion. Direct downloads use DNS/IP validation, pinned TLS connections, redirect revalidation, content-type and MP4 signature checks, streaming byte limits and a 15-minute download deadline.
-- Social URL classification for YouTube, TikTok, Facebook and Instagram. Actual media import is intentionally gated on approved provider APIs and account authorization; generic scraping/downloader extraction is not enabled.
+- Social URL ingestion for YouTube, TikTok, Facebook and Instagram using yt-dlp without requiring users to connect an account, provide OAuth credentials or supply browser cookies. URL acceptance does not guarantee retrieval: platform-side sign-in, age, bot-verification, privacy, regional or rate-limit controls can block an otherwise public link. ClipForge reports those failures rather than bypassing access controls. Direct public HTTPS MP4 remains the most reliable URL-ingestion path.
 - WhisperX transcript-driven candidate selection, PySceneDetect scene-boundary features, overlap suppression, FFmpeg extraction and ZIP manifest packaging.
 - Configurable worker concurrency and queue admission limit.
 - Health and capability endpoints.
@@ -69,7 +69,7 @@ uvicorn api:app --host 0.0.0.0 --port 7860
 
 - `GET /health`, `GET /healthz` — liveness.
 - `GET /capabilities` — installed runtime tools.
-- `POST /clips` — JSON body accepts either `{"media":"https://<project>.supabase.co/storage/v1/object/sign/..."}` or `{"media":"https://cdn.example.com/video.mp4"}`; returns `job_id` and `source_type`. Direct URLs must serve a valid MP4. Social-platform links return HTTP 422 until an authorized provider connector is configured.
+- `POST /clips` — JSON body accepts a Supabase signed URL, direct public HTTPS MP4 URL, or recognized YouTube, TikTok, Facebook and Instagram URL. Returns `job_id` and `source_type`. Social extraction is attempted without user OAuth or cookies, but platform restrictions can prevent retrieval; no login, CAPTCHA, anti-bot or DRM bypass is performed.
 - `GET /status/{job_id}` — returns `PENDING`, `RUNNING`, `COMPLETED`, or `FAILED`.
 - `GET /download/{job_id}` — ZIP artifact after completion.
 
