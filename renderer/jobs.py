@@ -42,7 +42,7 @@ def job_artifact(job_id: str) -> Path | None:
 
 def create_job(url: str, workdir: Path, clip_prompt: str | None = None, aspect_ratio: str = "9:16",
                caption_style: str = "karaoke", caption_position: str = "bottom", audio_cleanup: bool = True,
-               transition: str = "none", transition_duration: float = 0.5) -> str:
+               transition: str = "none", transition_duration: float = 0.5,\n               broll_assets: list[dict[str, Any]] | None = None) -> str:
     job_id = uuid.uuid4().hex
     job_dir = workdir / job_id
     job_dir.mkdir(parents=True, exist_ok=False)
@@ -117,7 +117,7 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
              clip_prompt: str | None = None, aspect_ratio: str | None = None,
              caption_style: str | None = None, caption_position: str | None = None,
              audio_cleanup: bool | None = None, transition: str | None = None,
-             transition_duration: float | None = None) -> None:
+             transition_duration: float | None = None,\n             broll_assets: list[dict[str, Any]] | None = None) -> None:
     try:
         source = job_dir / "source.media"
         if resume_staged:
@@ -131,7 +131,7 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
             partial = job_dir / "source.media.part"
             _download(url, partial)
             os.replace(partial, source)
-        if clip_prompt is None or aspect_ratio is None or caption_style is None or caption_position is None or audio_cleanup is None or transition is None or transition_duration is None:
+        if clip_prompt is None or aspect_ratio is None or caption_style is None or caption_position is None or audio_cleanup is None or transition is None or transition_duration is None or broll_assets is None:
             options_path = job_dir / "clipforge-options.json"
             if options_path.is_file():
                 try:
@@ -168,7 +168,7 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
             job_id, metrics={"progress": p, "stage": s}
         ), clip_prompt=clip_prompt, aspect_ratio=aspect_ratio,
             caption_style=caption_style, caption_position=caption_position, audio_cleanup=audio_cleanup,
-            transition=transition, transition_duration=transition_duration)
+            transition=transition, transition_duration=transition_duration,\n            broll_assets=staged_broll)
         if not results:
             raise PipelineError("No suitable speech-led clips were found in this source")
         _set(job_id, metrics={"progress": 92, "stage": "Packaging clips"})
