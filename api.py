@@ -163,7 +163,7 @@ def manifest(job_id: str, x_api_key: str | None = Header(default=None)) -> dict[
 def clip_file(job_id: str, filename: str, x_api_key: str | None = Header(default=None)):
     _authorize(x_api_key)
     _validate_job_id(job_id)
-    if not re.fullmatch(r"clip-[0-9]{2}\\.mp4", filename):
+    if not re.fullmatch(r"clip-[0-9]{2}\.mp4", filename):
         raise HTTPException(status_code=400, detail="Invalid clip filename")
     job = get_job(job_id)
     if not job or job.get("state") != "COMPLETED":
