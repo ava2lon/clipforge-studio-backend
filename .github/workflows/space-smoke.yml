@@ -1,0 +1,65 @@
+name: Verify deployed ClipForge Space
+
+on:
+  workflow_run:
+    workflows: ["Deploy ClipForge Backend to Hugging Face"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clipforge-space-smoke
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Wait for Space health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_URL="https://ava2lon-studio.hf.space"
+          deadline=$((SECONDS + 720))
+          until [ "$SECONDS" -ge "$deadline" ]; do
+            status="$(curl --silent --show-error --output /tmp/health.json --write-out '%{http_code}' --max-time 20 "$BASE_URL/health" || true)"
+            if [ "$status" = "200" ] && python -c 'import json; d=json.load(open("/tmp/health.json")); assert d.get("status") == "ok"; print(d)' ; then
+              echo "Space health endpoint is ready."
+              exit 0
+            fi
+            echo "Space not ready yet (HTTP ${status:-no response}); retrying in 15 seconds."
+            sleep 15
+          done
+          echo "Space did not become healthy within 12 minutes."
+          [ ! -f /tmp/health.json ] || cat /tmp/health.json
+          exit 1
+
+      - name: Verify required runtime capabilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 60 \
+            "https://ava2lon-studio.hf.space/capabilities" -o /tmp/capabilities.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path("/tmp/capabilities.json").read_text())
+          required = {
+              "ffmpeg": data.get("ffmpeg", {}).get("available"),
+              "ffprobe": data.get("ffprobe", {}).get("available"),
+              "auto_editor": data.get("auto_editor", {}).get("available"),
+              "remotion": data.get("remotion", {}).get("available"),
+              "whisperx": data.get("python_modules", {}).get("whisperx"),
+              "pyscenedetect": data.get("python_modules", {}).get("pyscenedetect"),
+          }
+          print(json.dumps({"capabilities": data, "required": required}, indent=2))
+          missing = [name for name, available in required.items() if available is not True]
+          if missing:
+              raise SystemExit("Missing required runtime capabilities: " + ", ".join(missing))
+          PY
