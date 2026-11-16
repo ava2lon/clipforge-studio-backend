@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field, HttpUrl
 
 from renderer.capabilities import collect_capabilities
 from renderer.jobs import (
-    clip_edit_artifact, create_clip_edit, create_job, get_clip_edit,
+    clip_edit_artifact, create_clip_edit, create_job, get_clip_edit, list_clip_edits,
     get_job, job_artifact, render_clip_edit,
 )
 from renderer.ingestion import SourceAccessRequired, ensure_supported_ingestion_source
@@ -194,6 +194,16 @@ def clip_file(job_id: str, filename: str, x_api_key: str | None = Header(default
         raise HTTPException(status_code=404, detail="Clip asset not found")
     return FileResponse(clip_path, media_type="video/mp4", filename=filename,
                         headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
+
+
+@app.get("/edits/{job_id}")
+def saved_clip_edits(job_id: str, x_api_key: str | None = Header(default=None)) -> dict[str, Any]:
+    _authorize(x_api_key)
+    _validate_job_id(job_id)
+    job = get_job(job_id)
+    if not job or job.get("state") != "COMPLETED":
+        raise HTTPException(status_code=409, detail="Completed Studio job is required")
+    return {"job_id": job_id, "edits": list_clip_edits(job_id, WORKDIR)}
 
 
 @app.post("/edit/{job_id}/{filename}", status_code=201)
