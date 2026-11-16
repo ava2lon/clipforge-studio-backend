@@ -138,6 +138,7 @@ def test_clean_audio_builds_safe_ffmpeg_filter_chain(monkeypatch, tmp_path):
     assert output.read_bytes() == b"cleaned"
     command = captured["command"]
     filters = command[command.index("-af") + 1]
+    assert "aresample=48000" in filters
     assert "highpass=f=80" in filters
     assert "afftdn=" in filters
     assert "loudnorm=I=-16" in filters
