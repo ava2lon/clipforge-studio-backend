@@ -149,11 +149,12 @@ const BrollOverlayLayer: React.FC<{ overlays: BrollOverlay[] }> = ({ overlays })
     <>
       {overlays.map((overlay, index) => {
         const from = Math.max(0, Math.round(overlay.startSeconds * fps));
-        const durationInFramesForOverlay = Math.max(1, Math.min(
-          Math.round(overlay.durationSeconds * fps),
-          durationInFrames - from,
-        ));
-        if (durationInFramesForOverlay <= 0) return null;
+        const remainingFrames = durationInFrames - from;
+        if (remainingFrames <= 0) return null;
+        const durationInFramesForOverlay = Math.min(
+          Math.max(1, Math.round(overlay.durationSeconds * fps)),
+          remainingFrames,
+        );
         return (
           <Sequence key={overlay.src + "-" + index} from={from} durationInFrames={durationInFramesForOverlay}>
             <OffthreadVideo
