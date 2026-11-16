@@ -75,6 +75,7 @@ uvicorn api:app --host 0.0.0.0 --port 7860
 - `GET /metrics` — API-key-protected aggregate job states, active job/edit render counts, worker/queue limits, workspace disk capacity and retention configuration. It does not expose source URLs, job IDs, user data or filesystem paths.
 - `POST /clips` — JSON body accepts a Supabase signed URL, direct public HTTPS MP4 URL, or recognized YouTube, TikTok, Facebook and Instagram URL. Optional `broll_assets` is an array of up to three objects: `{"url":"<signed Supabase Storage URL>","keywords":["office","team"]}`. B-roll URLs must use the signed-object endpoint on a Supabase project host; each asset is limited to 50 MB, combined assets to 100 MB, and each item accepts 1–8 keywords (40 characters maximum). Returns `job_id` and `source_type`. Social extraction is attempted without user OAuth or cookies, but platform restrictions can prevent retrieval; no login, CAPTCHA, anti-bot or DRM bypass is performed.
 - `GET /status/{job_id}` — returns `PENDING`, `RUNNING`, `COMPLETED`, or `FAILED`.
+- `POST /retry/{job_id}` — retry a failed job up to three total attempts when the source and all configured B-roll assets are already staged locally. Retry admission is atomic and obeys the global queue limit; unavailable staged inputs require resubmission.
 - `GET /download/{job_id}` — ZIP artifact after completion.
 - `GET /manifest/{job_id}` — completed-job manifest including editor-source references and per-clip rendering metadata.
 - `GET /clip/{job_id}/{filename}` — individual generated MP4.
