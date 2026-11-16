@@ -1,0 +1,94 @@
+import json
+import zipfile
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+import api
+import renderer.jobs as jobs
+from renderer.job_store import JobStore
+
+
+class ImmediateExecutor:
+    """Run the worker inline so this integration test has no timing races."""
+
+    def submit(self, fn, *args, **kwargs):
+        fn(*args, **kwargs)
+
+
+def test_submit_process_status_and_download_complete_lifecycle(tmp_path, monkeypatch):
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    monkeypatch.setattr(api, "WORKDIR", workdir)
+    monkeypatch.setattr(jobs, "_STORE", JobStore(tmp_path / "jobs.sqlite3"))
+    monkeypatch.setattr(jobs, "_EXECUTOR", ImmediateExecutor())
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "integration-secret")
+
+    def fake_download(_url, target):
+        target.write_bytes(b"synthetic-source-media")
+
+    def fake_probe(_source):
+        return {
+            "format": {"duration": "42.0"},
+            "streams": [
+                {"codec_type": "video", "width": 1280, "height": 720},
+                {"codec_type": "audio", "codec_name": "aac"},
+            ],
+        }
+
+    def fake_analyze(_source, output_dir, _media, progress=lambda *_: None):
+        clip = output_dir / "clip-01.mp4"
+        clip.write_bytes(b"synthetic-rendered-clip")
+        progress(90, "Rendered test clip")
+        return [{
+            "start": 1.0,
+            "end": 21.0,
+            "duration": 20.0,
+            "score": 0.8,
+            "transcript": "This is a deterministic integration-test clip.",
+            "name": clip.name,
+            "path": str(clip),
+            "scene_detection": "PySceneDetect",
+            "silence_analysis": "Auto-Editor",
+        }]
+
+    monkeypatch.setattr(jobs, "_download", fake_download)
+    monkeypatch.setattr(jobs, "probe_media", fake_probe)
+    monkeypatch.setattr(jobs, "analyze_and_extract", fake_analyze)
+
+    client = TestClient(api.app)
+    response = client.post(
+        "/clips",
+        headers={"X-API-Key": "integration-secret"},
+        json={
+            "media": (
+                "https://project.supabase.co/storage/v1/object/sign/"
+                "videos/source.mp4?token=test-token"
+            )
+        },
+    )
+    assert response.status_code == 202, response.text
+    job_id = response.json()["job_id"]
+
+    status = client.get(
+        f"/status/{job_id}", headers={"X-API-Key": "integration-secret"}
+    )
+    assert status.status_code == 200
+    assert status.json()["state"] == "COMPLETED"
+    assert status.json()["metrics"]["progress"] == 100
+
+    download = client.get(
+        f"/download/{job_id}", headers={"X-API-Key": "integration-secret"}
+    )
+    assert download.status_code == 200
+    assert download.headers["content-type"].startswith("application/zip")
+
+    archive_path = workdir / job_id / "clips.zip"
+    assert archive_path.is_file()
+    with zipfile.ZipFile(archive_path) as archive:
+        assert "clip-01.mp4" in archive.namelist()
+        assert "clipforge_manifest.json" in archive.namelist()
+        manifest = json.loads(archive.read("clipforge_manifest.json"))
+        assert manifest["job_id"] == job_id
+        assert manifest["clips"][0]["name"] == "clip-01.mp4"
+        assert archive.read("clip-01.mp4") == b"synthetic-rendered-clip"
