@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from renderer.job_store import JobStore
-from renderer.pipeline import PipelineError, _render_with_remotion, analyze_and_extract, probe_media
+from renderer.pipeline import PipelineError, _clean_audio, _render_with_remotion, analyze_and_extract, probe_media
 from renderer.security import is_allowed_supabase_storage_url
 from renderer.ingestion import download_direct_mp4, download_social_video, ensure_supported_ingestion_source
 
@@ -411,15 +411,26 @@ def _run_clip_edit(job_id: str, edit_id: str, job_dir: Path) -> None:
                     "start": overlap_start - trim_start,
                     "duration": overlap_end - overlap_start,
                 })
-        _render_with_remotion(
-            trimmed, output, duration, captions,
-            settings["aspect_ratio"], focus,
-            int(clip.get("source_width", 0)), int(clip.get("source_height", 0)),
-            settings["caption_style"], settings["caption_position"],
-            settings["transition"], float(settings["transition_duration"]),
-            placements, settings["brand_template"],
-        )
-        trimmed.unlink(missing_ok=True)
+        render_source = trimmed
+        cleaned = edit_dir / "cleaned-source.mp4"
+        try:
+            if clip.get("audio_cleanup") == "applied":
+                try:
+                    render_source = _clean_audio(trimmed, cleaned)
+                except PipelineError:
+                    cleaned.unlink(missing_ok=True)
+                    render_source = trimmed
+            _render_with_remotion(
+                render_source, output, duration, captions,
+                settings["aspect_ratio"], focus,
+                int(clip.get("source_width", 0)), int(clip.get("source_height", 0)),
+                settings["caption_style"], settings["caption_position"],
+                settings["transition"], float(settings["transition_duration"]),
+                placements, settings["brand_template"],
+            )
+        finally:
+            trimmed.unlink(missing_ok=True)
+            cleaned.unlink(missing_ok=True)
         state["state"] = "COMPLETED"
         state["failure_reason"] = None
         state["output_filename"] = "rendered.mp4"
