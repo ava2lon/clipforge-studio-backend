@@ -148,10 +148,17 @@ def test_direct_mp4_download_enforces_streaming_byte_limit(monkeypatch, tmp_path
 
 def test_direct_mp4_redirect_is_revalidated_before_following(monkeypatch, tmp_path):
     response = _FakeResponse([], headers={"Location": "http://127.0.0.1/private"}, status=302)
-    monkeypatch.setattr(
-        ingestion, "_validated_https_target",
-        lambda _url: ("cdn.example", 443, "/redirect", ["8.8.8.8"]),
-    )
+    original_validate = ingestion._validated_https_target
+    validations = 0
+
+    def validate_redirect(url):
+        nonlocal validations
+        validations += 1
+        if validations == 1:
+            return ("cdn.example", 443, "/redirect", ["8.8.8.8"])
+        return original_validate(url)
+
+    monkeypatch.setattr(ingestion, "_validated_https_target", validate_redirect)
     monkeypatch.setattr(
         ingestion, "_PinnedHTTPSConnection",
         lambda host, addresses: _FakeConnection(host, addresses, response),
