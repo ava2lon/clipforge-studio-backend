@@ -203,7 +203,7 @@ def _active_ratio(start: float, end: float, ranges: list[tuple[float, float]]) -
     return min(1.0, active / (end - start))
 
 
-def _aspect_dimensions(aspect_ratio: str) -> tuple[int, int]:
+def _validate_transition_options(transition: str, duration: float) -> float:\n    if transition not in {"none", "fade"}:\n        raise PipelineError("Transition must be none or fade")\n    if not 0.0 <= duration <= 1.5:\n        raise PipelineError("Transition duration must be between 0 and 1.5 seconds")\n    return 0.0 if transition == "none" else float(duration)\n\n\ndef _aspect_dimensions(aspect_ratio: str) -> tuple[int, int]:
     dimensions = {"9:16": (1080, 1920), "1:1": (1080, 1080), "16:9": (1920, 1080)}
     try:
         return dimensions[aspect_ratio]
