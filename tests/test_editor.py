@@ -208,3 +208,25 @@ def test_retry_job_requires_fully_staged_source(tmp_path, monkeypatch):
     monkeypatch.setattr(jobs, "_WORKDIR", tmp_path)
     with pytest.raises(ValueError, match="complete staged source"):
         jobs.retry_job(job_id)
+
+
+def test_new_job_admission_reserves_capacity_for_active_edit_renders(tmp_path, monkeypatch):
+    captured = {}
+
+    class AdmissionStore:
+        def create(self, job_id, download_url, max_active):
+            captured["job_id"] = job_id
+            captured["max_active"] = max_active
+
+    class FakeExecutor:
+        def submit(self, fn, *args, **kwargs):
+            captured["worker"] = fn.__name__
+
+    monkeypatch.setattr(jobs, "_STORE", AdmissionStore())
+    monkeypatch.setattr(jobs, "_EXECUTOR", FakeExecutor())
+    monkeypatch.setattr(jobs, "_MAX_ACTIVE_JOBS", 3)
+    monkeypatch.setattr(jobs, "_count_active_edit_renders", lambda workdir: 2)
+
+    job_id = jobs.create_job("https://example.com/video.mp4", tmp_path)
+
+    assert captured == {"job_id": job_id, "max_active": 1, "worker": "_run_job"}
