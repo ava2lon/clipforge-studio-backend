@@ -214,7 +214,7 @@ def test_yt_dlp_downloads_public_video_without_cookies(monkeypatch, tmp_path):
         calls["command"] = command
         calls["kwargs"] = kwargs
         output = tmp_path / "source.media.mp4"
-        output.write_bytes(b"\\x00\\x00\\x00\\x18ftypmp42video")
+        output.write_bytes(b"\x00\x00\x00\\x18ftypmp42video")
         class Result:
             returncode = 0
         return Result()
@@ -225,7 +225,7 @@ def test_yt_dlp_downloads_public_video_without_cookies(monkeypatch, tmp_path):
         "https://youtube.com/shorts/_az0sT5IYaE?si=RGARmBuPzvmIVrz3",
         target, 1024,
     )
-    assert target.read_bytes().startswith(b"\\x00\\x00\\x00\\x18ftyp")
+    assert target.read_bytes().startswith(b"\x00\x00\x00\\x18ftyp")
     assert "--ignore-config" in calls["command"]
     assert "--no-playlist" in calls["command"]
     assert "--cookies" not in calls["command"]
