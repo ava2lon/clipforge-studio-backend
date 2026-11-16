@@ -197,3 +197,59 @@ def test_clip_submission_rejects_non_supabase_broll_url(monkeypatch):
         },
     )
     assert response.status_code == 400
+
+
+def test_manifest_endpoint_requires_completed_job_and_returns_manifest(monkeypatch, tmp_path):
+    import json
+    import api
+
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    monkeypatch.setattr(api, "WORKDIR", tmp_path)
+    job_id = "f" * 32
+    job_dir = tmp_path / job_id
+    job_dir.mkdir()
+    expected = {"job_id": job_id, "clips": [{"name": "clip-01.mp4"}]}
+    (job_dir / "clipforge_manifest.json").write_text(json.dumps(expected), encoding="utf-8")
+    monkeypatch.setattr(api, "get_job", lambda value: {"state": "COMPLETED"} if value == job_id else None)
+
+    response = client.get(f"/manifest/{job_id}", headers={"X-API-Key": "test-secret"})
+    assert response.status_code == 200
+    assert response.json() == expected
+
+
+def test_manifest_endpoint_rejects_incomplete_job(monkeypatch):
+    import api
+
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    monkeypatch.setattr(api, "get_job", lambda value: {"state": "RUNNING"})
+    response = client.get(f"/manifest/{'a' * 32}", headers={"X-API-Key": "test-secret"})
+    assert response.status_code == 409
+
+
+def test_clip_asset_endpoint_serves_only_valid_completed_clip(monkeypatch, tmp_path):
+    import api
+
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    monkeypatch.setattr(api, "WORKDIR", tmp_path)
+    job_id = "c" * 32
+    clip_dir = tmp_path / job_id / "clips"
+    clip_dir.mkdir(parents=True)
+    clip_bytes = b"clip-test-bytes"
+    (clip_dir / "clip-01.mp4").write_bytes(clip_bytes)
+    monkeypatch.setattr(api, "get_job", lambda value: {"state": "COMPLETED"})
+
+    response = client.get(f"/clip/{job_id}/clip-01.mp4", headers={"X-API-Key": "test-secret"})
+    assert response.status_code == 200
+    assert response.content == clip_bytes
+    assert response.headers["content-type"].startswith("video/mp4")
+
+
+def test_clip_asset_endpoint_rejects_invalid_filename_and_incomplete_jobs(monkeypatch):
+    import api
+
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    monkeypatch.setattr(api, "get_job", lambda value: {"state": "RUNNING"})
+    response = client.get(f"/clip/{'b' * 32}/manifest.json", headers={"X-API-Key": "test-secret"})
+    assert response.status_code == 400
+    response = client.get(f"/clip/{'b' * 32}/clip-01.mp4", headers={"X-API-Key": "test-secret"})
+    assert response.status_code == 409
