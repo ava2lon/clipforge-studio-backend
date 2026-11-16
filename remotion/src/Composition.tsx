@@ -13,6 +13,7 @@ import {
 type Caption = { start: number; end: number; text: string };
 type CaptionStyle = "karaoke" | "bold" | "minimal";
 type CaptionPosition = "top" | "center" | "bottom";
+type BrandTemplate = "classic" | "creator" | "clean" | "neon";
 type FocusKeyframe = { time: number; x: number; y: number };
 type BrollOverlay = { src: string; startSeconds: number; durationSeconds: number };
 type ClipForgeProps = {
@@ -27,6 +28,7 @@ type ClipForgeProps = {
   transition: "none" | "fade";
   transitionDurationSeconds: number;
   brollOverlays: BrollOverlay[];
+  brandTemplate: BrandTemplate;
 };
 
 const clamp = (value: number, min: number, max: number) =>
@@ -85,7 +87,8 @@ const CaptionOverlay: React.FC<{
   captions: Caption[];
   style: CaptionStyle;
   position: CaptionPosition;
-}> = ({ captions, style, position }) => {
+  brandTemplate: BrandTemplate;
+}> = ({ captions, style, position, brandTemplate }) => {
   const frame = useCurrentFrame();
   const { fps, height } = useVideoConfig();
   const seconds = frame / fps;
@@ -108,11 +111,18 @@ const CaptionOverlay: React.FC<{
   const isTop = position === "top";
   const isBottom = position === "bottom";
   const y = isTop ? Math.round(height * 0.12) : Math.round(height * 0.5);
+  const templateAccent: Record<BrandTemplate, string> = {
+    classic: "#FDE047",
+    creator: "#22D3EE",
+    clean: "#FFFFFF",
+    neon: "#F0ABFC",
+  };
+  const activeAccent = templateAccent[brandTemplate] || templateAccent.classic;
   const palette = style === "karaoke"
-    ? { active: "#FDE047", inactive: "#FFFFFF", background: "rgba(0,0,0,0.58)" }
+    ? { active: activeAccent, inactive: "#FFFFFF", background: "rgba(0,0,0,0.58)" }
     : style === "bold"
       ? { active: "#FFFFFF", inactive: "#FFFFFF", background: "rgba(0,0,0,0.68)" }
-      : { active: "#FDE047", inactive: "#FFFFFF", background: "transparent" };
+      : { active: activeAccent, inactive: "#FFFFFF", background: "transparent" };
 
   return (
     <div style={{
@@ -171,7 +181,7 @@ const BrollOverlayLayer: React.FC<{ overlays: BrollOverlay[] }> = ({ overlays })
 
 const ClipForgeComposition: React.FC<ClipForgeProps> = ({
   captions, focusKeyframes, sourceWidth, sourceHeight, captionStyle, captionPosition,
-  transition, transitionDurationSeconds, brollOverlays,
+  transition, transitionDurationSeconds, brollOverlays, brandTemplate,
 }) => {
   const frame = useCurrentFrame();
   const { fps, width, height, durationInFrames } = useVideoConfig();
@@ -191,7 +201,7 @@ const ClipForgeComposition: React.FC<ClipForgeProps> = ({
         style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition }}
       />
       <BrollOverlayLayer overlays={brollOverlays || []} />
-      <CaptionOverlay captions={captions} style={captionStyle} position={captionPosition} />
+      <CaptionOverlay captions={captions} style={captionStyle} position={captionPosition} brandTemplate={brandTemplate} />
     </AbsoluteFill>
   );
 };
@@ -204,7 +214,7 @@ export const RemotionRoot: React.FC = () => (
     fps={30}
     width={1080}
     height={1920}
-    defaultProps={{ durationSeconds: 5, captions: [], aspectRatio: "9:16", focusKeyframes: [], sourceWidth: 0, sourceHeight: 0, captionStyle: "karaoke", captionPosition: "bottom", transition: "none", transitionDurationSeconds: 0.5, brollOverlays: [] }}
+    defaultProps={{ durationSeconds: 5, captions: [], aspectRatio: "9:16", focusKeyframes: [], sourceWidth: 0, sourceHeight: 0, captionStyle: "karaoke", captionPosition: "bottom", transition: "none", transitionDurationSeconds: 0.5, brollOverlays: [], brandTemplate: "classic" }}
     calculateMetadata={({ props }) => {
       const dimensions = props.aspectRatio === "16:9" ? { width: 1920, height: 1080 }
         : props.aspectRatio === "1:1" ? { width: 1080, height: 1080 }
