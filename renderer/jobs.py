@@ -190,7 +190,8 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
                 asset_media = probe_media(target)
                 if not any(stream.get("codec_type") == "video" for stream in asset_media.get("streams", [])):
                     raise PipelineError("B-roll assets must contain a video stream")
-                staged_broll.append({"path": str(target), "keywords": asset.get("keywords", []),\n                                     "duration": float(asset_media.get("format", {}).get("duration", 0))})
+                staged_broll.append({"path": str(target), "keywords": asset.get("keywords", []),
+                                     "duration": float(asset_media.get("format", {}).get("duration", 0))})
         media = probe_media(source)
         _set(job_id, metrics={"progress": 12, "stage": "Validating media"})
         clips_dir = job_dir / "clips"
