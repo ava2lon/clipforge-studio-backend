@@ -13,7 +13,6 @@ from pydantic import BaseModel, Field, HttpUrl
 
 from renderer.capabilities import collect_capabilities
 from renderer.jobs import create_job, get_job, job_artifact
-from renderer.security import is_allowed_supabase_storage_url
 from renderer.ingestion import SourceAccessRequired, ensure_supported_ingestion_source
 
 APP_VERSION = "0.2.0"
@@ -24,7 +23,7 @@ app = FastAPI(title="ClipForge Studio Backend", version=APP_VERSION)
 
 
 class ClipRequest(BaseModel):
-    media: HttpUrl = Field(..., description="HTTPS Supabase Storage signed URL")
+    media: HttpUrl = Field(..., description="HTTPS Supabase Storage signed URL or public direct MP4 URL")
 
 
 class ProbeRequest(BaseModel):
