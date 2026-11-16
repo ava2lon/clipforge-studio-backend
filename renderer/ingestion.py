@@ -1,15 +1,11 @@
-"""Safe source classification and direct MP4 ingestion.
-
-Social URLs are recognized but deliberately not downloaded through scraping.
-Those providers require their approved APIs, creator authorization, and media
-access scopes; the API reports that state explicitly.
-"""
+"""Source classification and bounded public-video ingestion."""
 from __future__ import annotations
 
 import http.client
 import ipaddress
 import socket
 import ssl
+import subprocess
 import time
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
@@ -37,6 +33,11 @@ def classify_source_url(value: str) -> str:
     except ValueError:
         return "invalid"
     if parsed.scheme.lower() != "https" or not host:
+        return "invalid"
+    try:
+        if parsed.port not in (None, 443) or parsed.username is not None or parsed.password is not None or parsed.fragment:
+            return "invalid"
+    except ValueError:
         return "invalid"
     if host == "youtube.com" or host.endswith(".youtube.com") or host in {"youtu.be", "www.youtu.be"}:
         return "youtube"
@@ -197,14 +198,71 @@ def download_direct_mp4(url: str, target: Path, max_bytes: int) -> None:
         raise
 
 
+def download_social_video(url: str, target: Path, max_bytes: int) -> None:
+    """Best-effort unauthenticated public-video extraction using yt-dlp.
+
+    No browser cookies, account credentials, or user-supplied headers are read.
+    Platform availability remains dependent on each site's public access rules.
+    """
+    source_type = classify_source_url(url)
+    if source_type not in {"youtube", "tiktok", "facebook", "instagram"}:
+        raise PipelineError("Unsupported social video URL")
+    output_base = target.with_suffix("")
+    output_pattern = str(output_base) + ".%(ext)s"
+    command = [
+        "yt-dlp",
+        "--ignore-config",
+        "--no-playlist",
+        "--no-warnings",
+        "--no-progress",
+        "--quiet",
+        "--no-cache-dir",
+        "--socket-timeout", "30",
+        "--retries", "2",
+        "--fragment-retries", "2",
+        "--max-filesize", str(max_bytes),
+        "--format", "best[ext=mp4]/best",
+        "--remux-video", "mp4",
+        "--output", output_pattern,
+        url,
+    ]
+    try:
+        result = subprocess.run(
+            command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, timeout=MAX_DOWNLOAD_SECONDS,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise PipelineError("Social video extraction is unavailable: yt-dlp is not installed") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise PipelineError("Social video extraction exceeded the 15-minute time limit") from exc
+    candidates = list(target.parent.glob(output_base.name + ".*"))
+    mp4_files = [path for path in candidates if path.suffix.lower() == ".mp4" and path.is_file()]
+    if result.returncode != 0 or not mp4_files:
+        for path in candidates:
+            path.unlink(missing_ok=True)
+        raise PipelineError(
+            f"Could not retrieve this public {source_type.title()} video. "
+            "It may be private, unavailable, age-restricted, or temporarily blocked by the platform."
+        )
+    downloaded = mp4_files[0]
+    try:
+        size = downloaded.stat().st_size
+        if size <= 0 or size > max_bytes:
+            raise PipelineError("Downloaded social video exceeds the configured source size limit")
+        with downloaded.open("rb") as stream:
+            header = stream.read(12)
+        if len(header) < 12 or header[4:8] != b"ftyp":
+            raise PipelineError("Social video extractor did not produce a valid MP4 file")
+        downloaded.replace(target)
+    finally:
+        for path in candidates:
+            if path != target:
+                path.unlink(missing_ok=True)
+
+
 def ensure_supported_ingestion_source(url: str) -> str:
     source_type = classify_source_url(url)
-    if source_type in {"youtube", "tiktok", "facebook", "instagram"}:
-        raise SourceAccessRequired(
-            f"{source_type.title()} links are recognized, but media download requires an approved "
-            "provider API integration and user authorization. Upload the original video or connect "
-            "an authorized source account."
-        )
     if source_type == "invalid":
         raise PipelineError("Source must be a valid HTTPS video URL")
     return source_type
