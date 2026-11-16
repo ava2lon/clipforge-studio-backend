@@ -175,3 +175,36 @@ def test_transition_options_validate_and_default_to_none():
         _validate_transition_options("slide", 0.5)
     with pytest.raises(PipelineError, match="between 0 and 1.5"):
         _validate_transition_options("fade", 2.0)
+
+
+def test_broll_placements_match_transcript_keywords_and_respect_duration():
+    from renderer.pipeline import _broll_placements
+
+    captions = [
+        {"start": 1.0, "end": 1.4, "text": "We opened the office"},
+        {"start": 5.0, "end": 5.4, "text": "Then the team shipped"},
+    ]
+    assets = [
+        {"path": "/tmp/office.mp4", "keywords": ["office"], "duration": 3.0},
+        {"path": "/tmp/team.mp4", "keywords": ["team"], "duration": 2.0},
+        {"path": "/tmp/unused.mp4", "keywords": ["ocean"], "duration": 4.0},
+    ]
+
+    placements = _broll_placements(captions, 10.0, assets)
+    assert len(placements) == 2
+    assert placements[0]["path"] == "/tmp/office.mp4"
+    assert placements[0]["start"] == 0.65
+    assert placements[0]["duration"] == 3.0
+    assert placements[1]["path"] == "/tmp/team.mp4"
+    assert placements[1]["duration"] == 2.0
+
+
+def test_broll_placements_skip_unmatched_and_too_short_assets():
+    from renderer.pipeline import _broll_placements
+
+    captions = [{"start": 2.0, "end": 2.3, "text": "A quiet moment"}]
+    assets = [
+        {"path": "/tmp/no-match.mp4", "keywords": ["spaceship"], "duration": 4.0},
+        {"path": "/tmp/short.mp4", "keywords": ["quiet"], "duration": 0.5},
+    ]
+    assert _broll_placements(captions, 8.0, assets) == []
