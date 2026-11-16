@@ -253,3 +253,54 @@ def test_clip_asset_endpoint_rejects_invalid_filename_and_incomplete_jobs(monkey
     assert response.status_code == 400
     response = client.get(f"/clip/{'b' * 32}/clip-01.mp4", headers={"X-API-Key": "test-secret"})
     assert response.status_code == 409
+
+
+def test_clip_edit_endpoint_saves_validated_settings(monkeypatch, tmp_path):
+    import api
+
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    monkeypatch.setattr(api, "WORKDIR", tmp_path)
+    monkeypatch.setattr(api, "create_clip_edit", lambda job_id, filename, workdir, settings: {
+        "edit_id": "d" * 32, "job_id": job_id, "clip_name": filename,
+        "state": "SAVED", "settings": settings,
+    })
+    response = client.post(
+        f"/edit/{'a' * 32}/clip-01.mp4",
+        headers={"X-API-Key": "test-secret"},
+        json={
+            "trim_start": 1,
+            "trim_end": 8,
+            "captions": [{"start": 1, "end": 1.5, "text": "Edited"}],
+            "aspect_ratio": "9:16",
+            "caption_style": "karaoke",
+            "caption_position": "bottom",
+            "transition": "fade",
+            "transition_duration": 0.5,
+            "brand_template": "creator",
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["state"] == "SAVED"
+    assert response.json()["settings"]["captions"][0]["text"] == "Edited"
+
+
+def test_clip_edit_endpoint_rejects_invalid_caption_template(monkeypatch):
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    response = client.post(
+        f"/edit/{'a' * 32}/clip-01.mp4",
+        headers={"X-API-Key": "test-secret"},
+        json={
+            "trim_start": 0, "trim_end": 5,
+            "captions": [], "brand_template": "unknown",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_clip_edit_endpoint_requires_api_key(monkeypatch):
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    response = client.post(
+        f"/edit/{'a' * 32}/clip-01.mp4",
+        json={"trim_start": 0, "trim_end": 5, "captions": []},
+    )
+    assert response.status_code == 401
