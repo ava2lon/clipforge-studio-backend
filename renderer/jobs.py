@@ -41,7 +41,8 @@ def job_artifact(job_id: str) -> Path | None:
 
 
 def create_job(url: str, workdir: Path, clip_prompt: str | None = None, aspect_ratio: str = "9:16",
-               caption_style: str = "karaoke", caption_position: str = "bottom", audio_cleanup: bool = True,\n               transition: str = "none", transition_duration: float = 0.5) -> str:
+               caption_style: str = "karaoke", caption_position: str = "bottom", audio_cleanup: bool = True,
+               transition: str = "none", transition_duration: float = 0.5) -> str:
     job_id = uuid.uuid4().hex
     job_dir = workdir / job_id
     job_dir.mkdir(parents=True, exist_ok=False)
@@ -53,6 +54,8 @@ def create_job(url: str, workdir: Path, clip_prompt: str | None = None, aspect_r
             "caption_style": caption_style,
             "caption_position": caption_position,
             "audio_cleanup": bool(audio_cleanup),
+            "transition": transition,
+            "transition_duration": transition_duration,
         }), encoding="utf-8")
         os.replace(options_tmp, job_dir / "clipforge-options.json")
         _STORE.create(job_id, f"/download/{job_id}", _MAX_ACTIVE_JOBS)
@@ -113,7 +116,8 @@ def _download(url: str, target: Path) -> None:
 def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = False,
              clip_prompt: str | None = None, aspect_ratio: str | None = None,
              caption_style: str | None = None, caption_position: str | None = None,
-             audio_cleanup: bool | None = None, transition: str | None = None,\n             transition_duration: float | None = None) -> None:
+             audio_cleanup: bool | None = None, transition: str | None = None,
+             transition_duration: float | None = None) -> None:
     try:
         source = job_dir / "source.media"
         if resume_staged:
@@ -142,12 +146,18 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
                         caption_position = str(options.get("caption_position") or "bottom")
                     if audio_cleanup is None:
                         audio_cleanup = bool(options.get("audio_cleanup", True))
+                    if transition is None:
+                        transition = str(options.get("transition") or "none")
+                    if transition_duration is None:
+                        transition_duration = float(options.get("transition_duration", 0.5))
                 except (OSError, ValueError, TypeError):
                     clip_prompt = None
         aspect_ratio = aspect_ratio or "9:16"
         caption_style = caption_style or "karaoke"
         caption_position = caption_position or "bottom"
         audio_cleanup = True if audio_cleanup is None else bool(audio_cleanup)
+        transition = transition or "none"
+        transition_duration = 0.5 if transition_duration is None else float(transition_duration)
         media = probe_media(source)
         _set(job_id, metrics={"progress": 12, "stage": "Validating media"})
         clips_dir = job_dir / "clips"
@@ -157,7 +167,8 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
         results = analyze_and_extract(source, clips_dir, media, progress=lambda p, s: _set(
             job_id, metrics={"progress": p, "stage": s}
         ), clip_prompt=clip_prompt, aspect_ratio=aspect_ratio,
-            caption_style=caption_style, caption_position=caption_position, audio_cleanup=audio_cleanup,\n            transition=transition, transition_duration=transition_duration)
+            caption_style=caption_style, caption_position=caption_position, audio_cleanup=audio_cleanup,
+            transition=transition, transition_duration=transition_duration)
         if not results:
             raise PipelineError("No suitable speech-led clips were found in this source")
         _set(job_id, metrics={"progress": 92, "stage": "Packaging clips"})
