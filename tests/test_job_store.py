@@ -127,3 +127,35 @@ def test_touch_refreshes_retention_for_recent_editor_activity(tmp_path: Path):
     store.touch("job-edit")
     assert store.cleanup_expired(workdir, 7 * 24 * 60 * 60) == 0
     assert store.get("job-edit")["state"] == "COMPLETED"
+
+
+def test_retry_failed_job_is_atomic_and_tracks_attempt_count(tmp_path: Path):
+    store = JobStore(tmp_path / "clipforge.sqlite3")
+    store.create("job-retry", "/download/job-retry", max_active=2)
+    store.update("job-retry", state="FAILED", failure_reason="temporary failure")
+
+    assert store.retry_failed("job-retry", max_active=2, max_attempts=3) == 2
+    job = store.get("job-retry")
+    assert job["state"] == "PENDING"
+    assert job["failure_reason"] is None
+    assert job["attempt_count"] == 2
+
+
+def test_retry_failed_job_rejects_active_queue_and_attempt_limit(tmp_path: Path):
+    store = JobStore(tmp_path / "clipforge.sqlite3")
+    store.create("job-retry", "/download/job-retry", max_active=2)
+    store.update("job-retry", state="FAILED")
+    with pytest.raises(RuntimeError, match="queue is full"):
+        store.retry_failed("job-retry", max_active=0)
+
+    with closing(store._connect()) as conn, conn:
+        conn.execute("UPDATE jobs SET attempt_count=3 WHERE job_id='job-retry'")
+    with pytest.raises(RuntimeError, match="maximum of 3 attempts"):
+        store.retry_failed("job-retry", max_active=2)
+
+
+def test_retry_failed_job_rejects_non_failed_state(tmp_path: Path):
+    store = JobStore(tmp_path / "clipforge.sqlite3")
+    store.create("job-active", "/download/job-active", max_active=2)
+    with pytest.raises(RuntimeError, match="Only failed jobs"):
+        store.retry_failed("job-active", max_active=2)
