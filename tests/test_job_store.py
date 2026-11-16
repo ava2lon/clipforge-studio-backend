@@ -99,3 +99,13 @@ def test_cleanup_rejects_retention_shorter_than_one_hour(tmp_path: Path):
     store = JobStore(tmp_path / "clipforge.sqlite3")
     with pytest.raises(ValueError, match="at least one hour"):
         store.cleanup_expired(tmp_path / "jobs", 30)
+
+
+def test_counts_by_state_reports_aggregate_job_counts(tmp_path: Path):
+    store = JobStore(tmp_path / "clipforge.sqlite3")
+    store.create("job-a", "/download/job-a", max_active=5)
+    store.create("job-b", "/download/job-b", max_active=5)
+    store.create("job-c", "/download/job-c", max_active=5)
+    store.update("job-a", state="COMPLETED")
+    store.update("job-b", state="FAILED")
+    assert store.counts_by_state() == {"COMPLETED": 1, "FAILED": 1, "PENDING": 1}
