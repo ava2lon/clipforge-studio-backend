@@ -119,6 +119,7 @@ def test_clip_submission_accepts_caption_presets(monkeypatch):
             "media": "https://cdn.example.net/video.mp4",
             "caption_style": "minimal",
             "caption_position": "top",
+            "quota_managed": True,
         },
     )
     assert response.status_code == 202
@@ -149,7 +150,7 @@ def test_clip_submission_can_disable_audio_cleanup(monkeypatch):
     response = client.post(
         "/clips",
         headers={"X-API-Key": "test-secret"},
-        json={"media": "https://cdn.example.net/video.mp4", "audio_cleanup": False},
+        json={"media": "https://cdn.example.net/video.mp4", "audio_cleanup": False, "quota_managed": True},
     )
     assert response.status_code == 202
     assert captured["args"][4] is False
