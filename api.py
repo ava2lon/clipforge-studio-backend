@@ -42,6 +42,7 @@ class ClipRequest(BaseModel):
     transition: Literal["none", "fade"] = Field(default="none", description="Fade video and audio at clip boundaries")
     transition_duration: float = Field(default=0.5, ge=0.0, le=1.5, description="Fade duration in seconds; maximum 1.5")
     max_source_duration_seconds: float | None = Field(default=None, gt=0, description="Server-enforced maximum source duration reserved by ClipForge billing")
+    quota_managed: bool = Field(default=False, description="Marks jobs whose retry and billing lifecycle is controlled by ClipForge")
     broll_assets: list[BrollAssetRequest] = Field(default_factory=list, max_length=3)
 
 
@@ -144,7 +145,7 @@ def submit_clip(request: ClipRequest, x_api_key: str | None = Header(default=Non
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
-        job_id = create_job(url, WORKDIR, request.clip_prompt, request.aspect_ratio, request.caption_style, request.caption_position, request.audio_cleanup, request.transition, request.transition_duration, request.max_source_duration_seconds,
+        job_id = create_job(url, WORKDIR, request.clip_prompt, request.aspect_ratio, request.caption_style, request.caption_position, request.audio_cleanup, request.transition, request.transition_duration, request.max_source_duration_seconds, request.quota_managed,
                               [{"url": str(asset.url), "keywords": [keyword.strip() for keyword in asset.keywords]} for asset in request.broll_assets])
     except RuntimeError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
