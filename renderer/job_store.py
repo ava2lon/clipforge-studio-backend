@@ -39,6 +39,9 @@ class JobStore:
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_updated_at ON jobs(updated_at)")
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)")}
+            if "attempt_count" not in columns:
+                conn.execute("ALTER TABLE jobs ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 1")
 
     def create(self, job_id: str, download_url: str, max_active: int) -> None:
         with closing(self._connect()) as conn, conn:
@@ -49,7 +52,7 @@ class JobStore:
             if int(active) >= max_active:
                 raise RuntimeError("Studio queue is full; retry later")
             conn.execute(
-                "INSERT INTO jobs(job_id,state,metrics_json,download_url) VALUES(?,?,?,?)",
+                "INSERT INTO jobs(job_id,state,metrics_json,download_url,attempt_count) VALUES(?,?,?,?,1)",
                 (job_id, "PENDING", json.dumps({"progress": 0, "stage": "Queued"}), download_url),
             )
 
@@ -75,6 +78,34 @@ class JobStore:
             if cursor.rowcount != 1:
                 raise KeyError(f"Unknown job: {job_id}")
 
+    def retry_failed(self, job_id: str, max_active: int, max_attempts: int = 3) -> int:
+        """Atomically admit one retry for a failed job and increment its attempt count."""
+        with closing(self._connect()) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT state, attempt_count FROM jobs WHERE job_id=?",
+                (job_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"Unknown job: {job_id}")
+            if row["state"] != "FAILED":
+                raise RuntimeError("Only failed jobs can be retried")
+            attempt_count = int(row["attempt_count"] or 1)
+            if attempt_count >= max_attempts:
+                raise RuntimeError(f"Job reached the maximum of {max_attempts} attempts")
+            active = conn.execute(
+                "SELECT COUNT(*) AS n FROM jobs WHERE state IN ('PENDING','RUNNING')"
+            ).fetchone()["n"]
+            if int(active) >= max_active:
+                raise RuntimeError("Studio queue is full; retry later")
+            next_attempt = attempt_count + 1
+            conn.execute(
+                """UPDATE jobs SET state='PENDING', failure_reason=NULL, attempt_count=?,
+                   metrics_json=?, updated_at=CURRENT_TIMESTAMP WHERE job_id=?""",
+                (next_attempt, json.dumps({"progress": 5, "stage": "Retry queued"}), job_id),
+            )
+            return next_attempt
+
     def touch(self, job_id: str) -> None:
         """Refresh retention age after a user creates or renders an edit."""
         with closing(self._connect()) as conn, conn:
@@ -96,6 +127,7 @@ class JobStore:
             "metrics": json.loads(row["metrics_json"]),
             "failure_reason": row["failure_reason"],
             "download_url": row["download_url"],
+            "attempt_count": int(row["attempt_count"] or 1),
         }
 
     def artifact(self, job_id: str) -> Path | None:
