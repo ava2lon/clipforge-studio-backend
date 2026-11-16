@@ -33,15 +33,17 @@ def test_clip_submission_requires_api_key(monkeypatch):
     assert response.status_code == 401
 
 
-def test_clip_submission_requires_authorized_social_source(monkeypatch):
+def test_clip_submission_accepts_public_social_source_without_oauth(monkeypatch):
     monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    monkeypatch.setattr("api.create_job", lambda url, workdir: "b" * 32)
     response = client.post(
         "/clips",
         headers={"X-API-Key": "test-secret"},
-        json={"media": "https://www.youtube.com/watch?v=abc123"},
+        json={"media": "https://youtube.com/shorts/_az0sT5IYaE?si=RGARmBuPzvmIVrz3"},
     )
-    assert response.status_code == 422
-    assert "approved provider API" in response.json()["detail"]
+    assert response.status_code == 202
+    assert response.json()["source_type"] == "youtube"
+    assert response.json()["job_id"] == "b" * 32
 
 
 
