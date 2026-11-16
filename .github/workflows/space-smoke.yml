@@ -58,8 +58,19 @@ jobs:
               "whisperx": data.get("python_modules", {}).get("whisperx"),
               "pyscenedetect": data.get("python_modules", {}).get("pyscenedetect"),
           }
-          print(json.dumps({"capabilities": data, "required": required}, indent=2))
+          storage = data.get("storage")
+          print(json.dumps({"required": required, "storage": storage}, indent=2))
           missing = [name for name, available in required.items() if available is not True]
           if missing:
               raise SystemExit("Missing required runtime capabilities: " + ", ".join(missing))
+          if not isinstance(storage, dict):
+              raise SystemExit("Storage diagnostics are missing from the deployed runtime.")
+          storage_fields = (
+              "workdir_mountpoint_detected",
+              "database_parent_mountpoint_detected",
+              "workdir_and_database_same_filesystem",
+          )
+          invalid_storage = [name for name in storage_fields if not isinstance(storage.get(name), bool)]
+          if invalid_storage:
+              raise SystemExit("Invalid storage diagnostics: " + ", ".join(invalid_storage))
           PY
