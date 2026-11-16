@@ -423,7 +423,8 @@ def _rank_candidates(segments: list[dict[str, Any]], scenes: list[float],
 def analyze_and_extract(source: Path, output_dir: Path, media: dict[str, Any],
                         progress: Callable[[int, str], None] = lambda *_: None,
                         clip_prompt: str | None = None, aspect_ratio: str = "9:16",
-                        caption_style: str = "karaoke", caption_position: str = "bottom",\n                        audio_cleanup: bool = True) -> list[dict[str, Any]]:
+                        caption_style: str = "karaoke", caption_position: str = "bottom",
+                        audio_cleanup: bool = True) -> list[dict[str, Any]]:
     _aspect_dimensions(aspect_ratio)
     duration = float(media.get("format", {}).get("duration", 0))
     if duration <= 0:
