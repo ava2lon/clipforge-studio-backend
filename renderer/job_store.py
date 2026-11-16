@@ -75,6 +75,16 @@ class JobStore:
             if cursor.rowcount != 1:
                 raise KeyError(f"Unknown job: {job_id}")
 
+    def touch(self, job_id: str) -> None:
+        """Refresh retention age after a user creates or renders an edit."""
+        with closing(self._connect()) as conn, conn:
+            cursor = conn.execute(
+                "UPDATE jobs SET updated_at=CURRENT_TIMESTAMP WHERE job_id=?",
+                (job_id,),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(f"Unknown job: {job_id}")
+
     def get(self, job_id: str) -> dict[str, Any] | None:
         with closing(self._connect()) as conn, conn:
             row = conn.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
