@@ -51,7 +51,8 @@ def create_job(url: str, workdir: Path, clip_prompt: str | None = None, aspect_r
             "clip_prompt": (clip_prompt or "").strip()[:500],
             "aspect_ratio": aspect_ratio,
             "caption_style": caption_style,
-            "caption_position": caption_position,\n            "audio_cleanup": bool(audio_cleanup),
+            "caption_position": caption_position,
+            "audio_cleanup": bool(audio_cleanup),
         }), encoding="utf-8")
         os.replace(options_tmp, job_dir / "clipforge-options.json")
         _STORE.create(job_id, f"/download/{job_id}", _MAX_ACTIVE_JOBS)
@@ -111,7 +112,8 @@ def _download(url: str, target: Path) -> None:
 
 def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = False,
              clip_prompt: str | None = None, aspect_ratio: str | None = None,
-             caption_style: str | None = None, caption_position: str | None = None,\n             audio_cleanup: bool | None = None) -> None:
+             caption_style: str | None = None, caption_position: str | None = None,
+             audio_cleanup: bool | None = None) -> None:
     try:
         source = job_dir / "source.media"
         if resume_staged:
@@ -142,7 +144,8 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
                     clip_prompt = None
         aspect_ratio = aspect_ratio or "9:16"
         caption_style = caption_style or "karaoke"
-        caption_position = caption_position or "bottom"\n        audio_cleanup = True if audio_cleanup is None else bool(audio_cleanup)
+        caption_position = caption_position or "bottom"
+        audio_cleanup = True if audio_cleanup is None else bool(audio_cleanup)
         media = probe_media(source)
         _set(job_id, metrics={"progress": 12, "stage": "Validating media"})
         clips_dir = job_dir / "clips"
@@ -169,7 +172,8 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
                                  x["silence_analysis"] == "Auto-Editor" for x in results
                              ), "selection": "explainable 0-100 heuristic score: speech density, hook strength, context completeness, ending strength, scene alignment, audio activity, and optional prompt relevance",
                              "clip_prompt": clip_prompt or None, "aspect_ratio": aspect_ratio,
-                              "caption_style": caption_style, "caption_position": caption_position,\n                              "audio_cleanup": audio_cleanup,
+                              "caption_style": caption_style, "caption_position": caption_position,
+                              "audio_cleanup": audio_cleanup,
                              "rendering": "Remotion captions and FFmpeg encoding"},
             }, indent=2))
         _STORE.update(job_id, artifact_path=archive, state="COMPLETED",
