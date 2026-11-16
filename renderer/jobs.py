@@ -122,10 +122,13 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
             options_path = job_dir / "clipforge-options.json"
             if options_path.is_file():
                 try:
-                    options = json.loads(options_path.read_text(encoding="utf-8"))\n                    clip_prompt = str(options.get("clip_prompt") or "") or None\n                    aspect_ratio = str(options.get("aspect_ratio") or "9:16")
+                    options = json.loads(options_path.read_text(encoding="utf-8"))
+                    clip_prompt = str(options.get("clip_prompt") or "") or None
+                    aspect_ratio = str(options.get("aspect_ratio") or "9:16")
                 except (OSError, ValueError, TypeError):
                     clip_prompt = None
-        aspect_ratio = aspect_ratio or "9:16"\n        media = probe_media(source)
+        aspect_ratio = aspect_ratio or "9:16"
+        media = probe_media(source)
         _set(job_id, metrics={"progress": 12, "stage": "Validating media"})
         clips_dir = job_dir / "clips"
         import shutil
