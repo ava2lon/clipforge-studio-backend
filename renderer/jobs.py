@@ -140,6 +140,8 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
                         caption_style = str(options.get("caption_style") or "karaoke")
                     if caption_position is None:
                         caption_position = str(options.get("caption_position") or "bottom")
+                    if audio_cleanup is None:
+                        audio_cleanup = bool(options.get("audio_cleanup", True))
                 except (OSError, ValueError, TypeError):
                     clip_prompt = None
         aspect_ratio = aspect_ratio or "9:16"
@@ -172,9 +174,10 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
                                  x["silence_analysis"] == "Auto-Editor" for x in results
                              ), "selection": "explainable 0-100 heuristic score: speech density, hook strength, context completeness, ending strength, scene alignment, audio activity, and optional prompt relevance",
                              "clip_prompt": clip_prompt or None, "aspect_ratio": aspect_ratio,
-                              "caption_style": caption_style, "caption_position": caption_position,
+                              "caption_style": caption_style, "caption_position": caption_position, "audio_cleanup": audio_cleanup,
                               "audio_cleanup": audio_cleanup,
-                             "rendering": "Remotion captions and FFmpeg encoding"},
+                             "rendering": "Remotion captions and FFmpeg encoding",
+                              "audio_cleanup": "FFmpeg denoise, filtering and loudness normalization" if audio_cleanup else "disabled"},
             }, indent=2))
         _STORE.update(job_id, artifact_path=archive, state="COMPLETED",
                       metrics={"progress": 100, "stage": "Clips ready"})
