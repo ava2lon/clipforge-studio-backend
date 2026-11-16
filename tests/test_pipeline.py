@@ -34,3 +34,45 @@ def test_parse_auto_editor_v1_fractional_timebase():
 
     timeline = {"version": "1", "timebase": "30000/1001", "chunks": [[0, 30000, 1]]}
     assert _parse_auto_editor_timeline(timeline) == [(0.0, 1001.0)]
+
+
+
+def test_rank_candidates_exposes_explainable_score_factors():
+    segments = [
+        {"start": i * 3.0, "end": i * 3.0 + 2.5,
+         "text": "Here is the surprising truth about dogs and why this matters?"}
+        for i in range(30)
+    ]
+    clips = _rank_candidates(segments, [30.0], 120.0)
+    assert clips
+    clip = clips[0]
+    assert 0 <= clip["virality_score"] <= 100
+    assert clip["score"] == clip["virality_score"]
+    assert set(clip["score_factors"]) == {
+        "speech_density", "hook_strength", "context_completeness",
+        "ending_strength", "scene_alignment", "audio_activity", "prompt_relevance"
+    }
+    assert clip["score"] == round(sum(clip["score_factors"].values()), 1)
+
+
+def test_rank_candidates_prompt_discovery_filters_unmatched_topics():
+    segments = [
+        {"start": i * 3.0, "end": i * 3.0 + 2.5,
+         "text": ("The dog learned an important lesson about trust and friendship."
+                  if i < 15 else
+                  "Here is the truth about financial markets and investing?")}
+        for i in range(30)
+    ]
+    clips = _rank_candidates(segments, [], 120.0, prompt="dog friendship")
+    assert clips
+    assert all("dog" in clip["transcript"].lower() for clip in clips)
+    assert all(clip["prompt_match"] > 0 for clip in clips)
+
+
+def test_rank_candidates_prompt_with_no_matches_returns_empty():
+    segments = [
+        {"start": i * 3.0, "end": i * 3.0 + 2.5,
+         "text": "A story about financial markets and investing."}
+        for i in range(30)
+    ]
+    assert _rank_candidates(segments, [], 120.0, prompt="astronaut cooking") == []
