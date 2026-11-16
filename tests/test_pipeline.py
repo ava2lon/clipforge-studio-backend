@@ -162,3 +162,4 @@ def test_clean_audio_removes_partial_output_on_ffmpeg_failure(monkeypatch, tmp_p
         _clean_audio(source, output)
     assert not output.exists()
     assert not (tmp_path / "clean.part.mp4").exists()
+\n\ndef test_transition_options_validate_and_default_to_none():\n    import pytest\n    from renderer.pipeline import PipelineError\n\n    # The transition contract is deliberately bounded to avoid excessive render cost.\n    with pytest.raises(PipelineError, match="Transition must be"):\n        from renderer.pipeline import _validate_transition_options\n        _validate_transition_options("slide", 0.5)\n
