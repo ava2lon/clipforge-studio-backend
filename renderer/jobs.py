@@ -16,7 +16,7 @@ from typing import Any
 from renderer.job_store import JobStore
 from renderer.pipeline import PipelineError, analyze_and_extract, probe_media
 from renderer.security import is_allowed_supabase_storage_url
-from renderer.ingestion import download_direct_mp4, ensure_supported_ingestion_source
+from renderer.ingestion import download_direct_mp4, download_social_video, ensure_supported_ingestion_source
 
 _MAX_WORKERS = max(1, int(os.getenv("CLIPFORGE_MAX_WORKERS", "1")))
 _MAX_ACTIVE_JOBS = _MAX_WORKERS * 3
@@ -72,8 +72,11 @@ class _SupabaseRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 def _download(url: str, target: Path) -> None:
     if not is_allowed_supabase_storage_url(url):
-        ensure_supported_ingestion_source(url)
-        download_direct_mp4(url, target, _MAX_DOWNLOAD_BYTES)
+        source_type = ensure_supported_ingestion_source(url)
+        if source_type in {"youtube", "tiktok", "facebook", "instagram"}:
+            download_social_video(url, target, _MAX_DOWNLOAD_BYTES)
+        else:
+            download_direct_mp4(url, target, _MAX_DOWNLOAD_BYTES)
         return
     request = urllib.request.Request(url, headers={"User-Agent": "ClipForge-Studio/0.2"})
     total = 0
