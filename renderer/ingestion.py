@@ -10,6 +10,7 @@ import http.client
 import ipaddress
 import socket
 import ssl
+import time
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
@@ -19,6 +20,7 @@ from renderer.security import is_allowed_supabase_storage_url
 MAX_REDIRECTS = 3
 CONNECT_TIMEOUT_SECONDS = 12
 READ_TIMEOUT_SECONDS = 30
+MAX_DOWNLOAD_SECONDS = 15 * 60
 _CHUNK_SIZE = 1024 * 1024
 
 
@@ -120,7 +122,7 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
                 self.sock = self._context.wrap_socket(raw, server_hostname=self.host)
                 self.sock.settimeout(READ_TIMEOUT_SECONDS)
                 return
-            except (OSError, ssl.SSLError) as exc:
+            except (OSError, ssl.SSLError, PipelineError) as exc:
                 last_error = exc
                 if raw is not None:
                     raw.close()
@@ -131,6 +133,7 @@ def download_direct_mp4(url: str, target: Path, max_bytes: int) -> None:
     """Download an HTTPS MP4 without following unvalidated redirects or DNS."""
     current = url
     total = 0
+    started = time.monotonic()
     try:
         for redirect_count in range(MAX_REDIRECTS + 1):
             host, _port, request_target, addresses = _validated_https_target(current)
@@ -173,11 +176,15 @@ def download_direct_mp4(url: str, target: Path, max_bytes: int) -> None:
                         chunk = response.read(_CHUNK_SIZE)
                         if not chunk:
                             break
+                        if time.monotonic() - started > MAX_DOWNLOAD_SECONDS:
+                            raise PipelineError("Source download exceeded the configured time limit")
+                        if len(first) < 12:
+                            first += chunk[:12 - len(first)]
+                            if len(first) >= 12 and first[4:8] != b"ftyp":
+                                raise PipelineError("Downloaded file is not an MP4 stream")
                         total += len(chunk)
                         if total > max_bytes:
                             raise PipelineError("Source exceeds configured maximum source size")
-                        if len(first) < 12:
-                            first += chunk[:12 - len(first)]
                         output.write(chunk)
                 if total < 12 or first[4:8] != b"ftyp":
                     raise PipelineError("Downloaded file is not a valid ISO Base Media/MP4 stream")
