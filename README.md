@@ -32,7 +32,7 @@ Docker-based video processing API for the ClipForge frontend. This repository is
 - Per-clip edited MP4 rendering reuses the same Remotion composition and FFmpeg pipeline; the original generated clip remains unchanged.
 - Health and capability endpoints.
 - SQLite-backed job metadata and automatic restart recovery when a complete source file was staged before interruption.
-- Automatic workspace and database cleanup for completed/failed jobs after the retention window (default seven days); cleanup runs hourly.
+- Automatic workspace and database cleanup for completed/failed jobs after the retention window (default seven days); cleanup runs hourly. Creating or rendering an edit refreshes the parent job’s retention timestamp, and startup recovery only resumes edits that fit within the global worker admission limit.
 
 Candidate scores are deterministic heuristics based on speech density, a small set of hook-language patterns, nearby scene boundaries, and Auto-Editor active-audio overlap. They are not a trained virality predictor and must not be marketed as such.
 
