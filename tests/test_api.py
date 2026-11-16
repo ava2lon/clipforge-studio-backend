@@ -152,5 +152,5 @@ def test_clip_submission_can_disable_audio_cleanup(monkeypatch):
         json={"media": "https://cdn.example.net/video.mp4", "audio_cleanup": False},
     )
     assert response.status_code == 202
-    assert captured["args"][6] is False
+    assert captured["args"][4] is False
     assert captured["args"][-2:] == ("none", 0.5)
