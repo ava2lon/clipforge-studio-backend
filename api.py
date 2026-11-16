@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, HttpUrl
 from renderer.capabilities import collect_capabilities
 from renderer.jobs import create_job, get_job, job_artifact
 from renderer.security import is_allowed_supabase_storage_url
+from renderer.ingestion import SourceAccessRequired, ensure_supported_ingestion_source
 
 APP_VERSION = "0.2.0"
 _JOB_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
@@ -85,8 +86,12 @@ def capabilities() -> dict[str, Any]:
 def submit_clip(request: ClipRequest, x_api_key: str | None = Header(default=None)) -> dict[str, str]:
     _authorize(x_api_key)
     url = str(request.media)
-    if not is_allowed_supabase_storage_url(url):
-        raise HTTPException(status_code=400, detail="media must be a valid HTTPS Supabase Storage signed URL on port 443")
+    try:
+        ensure_supported_ingestion_source(url)
+    except SourceAccessRequired as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         job_id = create_job(url, WORKDIR)
     except RuntimeError as exc:
