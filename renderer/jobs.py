@@ -208,22 +208,25 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
             raise PipelineError("No suitable speech-led clips were found in this source")
         _set(job_id, metrics={"progress": 92, "stage": "Packaging clips"})
         archive = job_dir / "clips.zip"
+        manifest = {
+            "job_id": job_id,
+            "source_duration_seconds": media["format"]["duration"],
+            "clips": [{k: v for k, v in item.items() if k != "path"} for item in results],
+            "analysis": {"transcription": "WhisperX", "scene_detection": "PySceneDetect",
+                         "auto_editor_silence_analysis": all(
+                             x["silence_analysis"] == "Auto-Editor" for x in results
+                         ), "selection": "explainable 0-100 heuristic score: speech density, hook strength, context completeness, ending strength, scene alignment, audio activity, and optional prompt relevance",
+                         "clip_prompt": clip_prompt or None, "aspect_ratio": aspect_ratio,
+                         "caption_style": caption_style, "caption_position": caption_position,
+                         "audio_cleanup": "FFmpeg high-pass/low-pass filtering, spectral denoise and loudness normalization" if audio_cleanup else "disabled",
+                         "rendering": "Remotion captions and FFmpeg encoding"},
+        }
+        manifest_json = json.dumps(manifest, indent=2)
+        (job_dir / "clipforge_manifest.json").write_text(manifest_json, encoding="utf-8")
         with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
             for item in results:
                 bundle.write(item["path"], arcname=Path(item["path"]).name)
-            bundle.writestr("clipforge_manifest.json", json.dumps({
-                "job_id": job_id,
-                "source_duration_seconds": media["format"]["duration"],
-                "clips": [{k: v for k, v in item.items() if k != "path"} for item in results],
-                "analysis": {"transcription": "WhisperX", "scene_detection": "PySceneDetect",
-                             "auto_editor_silence_analysis": all(
-                                 x["silence_analysis"] == "Auto-Editor" for x in results
-                             ), "selection": "explainable 0-100 heuristic score: speech density, hook strength, context completeness, ending strength, scene alignment, audio activity, and optional prompt relevance",
-                             "clip_prompt": clip_prompt or None, "aspect_ratio": aspect_ratio,
-                             "caption_style": caption_style, "caption_position": caption_position,
-                             "audio_cleanup": "FFmpeg high-pass/low-pass filtering, spectral denoise and loudness normalization" if audio_cleanup else "disabled",
-                             "rendering": "Remotion captions and FFmpeg encoding"},
-            }, indent=2))
+            bundle.writestr("clipforge_manifest.json", manifest_json)
         _STORE.update(job_id, artifact_path=archive, state="COMPLETED",
                       metrics={"progress": 100, "stage": "Clips ready"})
     except Exception as exc:
