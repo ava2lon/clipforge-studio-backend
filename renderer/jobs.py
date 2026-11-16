@@ -280,7 +280,7 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
         source_duration_seconds = float(media.get("format", {}).get("duration", 0))
         if source_duration_seconds <= 0:
             raise PipelineError("Source media has no valid positive duration")
-        if max_source_duration_seconds is not None and source_duration_seconds > max_source_duration_seconds + 0.05:
+        if max_source_duration_seconds is not None and source_duration_seconds > max_source_duration_seconds:
             raise PipelineError("Source duration exceeds the remaining plan allocation; upgrade your plan or use a shorter source")
         _set(job_id, metrics={"progress": 12, "stage": "Validating media", "source_duration_seconds": source_duration_seconds})
         clips_dir = job_dir / "clips"
