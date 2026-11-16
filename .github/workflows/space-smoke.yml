@@ -84,18 +84,23 @@ jobs:
           if [ -z "${STUDIO_API_KEY}" ]; then
             status="$(curl --silent --show-error --output /tmp/metrics.json --write-out '%{http_code}' --max-time 30 \
               "https://ava2lon-studio.hf.space/metrics")"
-            if [ "${status}" != "401" ]; then
-              echo "Unauthenticated metrics request should return HTTP 401, received ${status}."
-              cat /tmp/metrics.json
-              exit 1
-            fi
-            python - <<'PY'
+            python - "${status}" <<'PY'
           import json
+          import sys
           from pathlib import Path
 
+          status = sys.argv[1]
           data = json.loads(Path("/tmp/metrics.json").read_text())
-          assert data.get("detail") == "Unauthorized", data
-          print("Metrics endpoint correctly rejects unauthenticated requests.")
+          # 401 means the configured API key rejected an unauthenticated request.
+          # 503 means the runtime has no API key configured; it still fails closed.
+          valid = (
+              status == "401" and data.get("detail") == "Unauthorized"
+          ) or (
+              status == "503" and data.get("detail") == "Studio API key is not configured"
+          )
+          if not valid:
+              raise SystemExit(f"Metrics endpoint did not fail closed: HTTP {status}: {data}")
+          print(f"Metrics endpoint correctly fails closed without a caller key (HTTP {status}).")
           PY
             exit 0
           fi
