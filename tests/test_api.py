@@ -337,3 +337,31 @@ def test_metrics_endpoint_returns_aggregate_runtime_data(monkeypatch):
     assert body["jobs_by_state"]["COMPLETED"] == 4
     assert body["queue"]["active_edit_renders"] == 2
     assert body["storage"]["free_bytes"] == 600
+
+
+def test_retry_endpoint_requires_api_key(monkeypatch):
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    response = client.post(f"/retry/{'a' * 32}")
+    assert response.status_code == 401
+
+
+def test_retry_endpoint_returns_accepted_attempt(monkeypatch):
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    monkeypatch.setattr("api.retry_job", lambda job_id: {
+        "job_id": job_id, "state": "PENDING", "attempt_count": 2,
+    })
+    response = client.post(
+        f"/retry/{'a' * 32}",
+        headers={"X-API-Key": "test-secret"},
+    )
+    assert response.status_code == 202
+    assert response.json()["attempt_count"] == 2
+
+
+def test_retry_endpoint_rejects_invalid_job_id(monkeypatch):
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    response = client.post(
+        "/retry/not-a-job",
+        headers={"X-API-Key": "test-secret"},
+    )
+    assert response.status_code == 400
