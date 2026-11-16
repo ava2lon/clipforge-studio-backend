@@ -80,3 +80,37 @@ def test_create_clip_edit_rejects_path_traversal_and_missing_source(tmp_path, mo
     (job_dir / "clips" / "editor-source" / "clip-01.mp4").unlink()
     with pytest.raises(FileNotFoundError, match="Editable source"):
         jobs.create_clip_edit(job_id, "clip-01.mp4", tmp_path, _settings())
+
+
+def test_edit_render_trims_shifts_captions_and_marks_complete(tmp_path, monkeypatch):
+    job_id, job_dir = _fixture_job(tmp_path, monkeypatch)
+    state = jobs.create_clip_edit(job_id, "clip-01.mp4", tmp_path, _settings())
+    monkeypatch.setattr(jobs.shutil, "which", lambda name: "/usr/bin/ffmpeg" if name == "ffmpeg" else None)
+
+    def fake_ffmpeg(command, **kwargs):
+        output = __import__("pathlib").Path(command[-1])
+        output.write_bytes(b"trimmed-media")
+        return type("Result", (), {"returncode": 0, "stderr": "", "stdout": ""})()
+
+    captured = {}
+
+    def fake_render(source, output, duration, captions, *args):
+        captured["duration"] = duration
+        captured["captions"] = captions
+        captured["focus"] = args[2]
+        output.write_bytes(b"rendered-mp4")
+        return output
+
+    monkeypatch.setattr(jobs.subprocess, "run", fake_ffmpeg)
+    monkeypatch.setattr(jobs, "_render_with_remotion", fake_render)
+    jobs._run_clip_edit(job_id, state["edit_id"], job_dir)
+
+    final_state = jobs.get_clip_edit(job_id, state["edit_id"], tmp_path)
+    assert final_state["state"] == "COMPLETED"
+    assert jobs.clip_edit_artifact(job_id, state["edit_id"], tmp_path).read_bytes() == b"rendered-mp4"
+    assert captured["duration"] == 9.0
+    assert captured["captions"] == [
+        {"start": 0.0, "end": 0.5, "text": "Edited"},
+        {"start": 1.0, "end": 1.5, "text": "word"},
+    ]
+    assert captured["focus"] == [{"time": 0.0, "x": 0.5, "y": 0.4}]
