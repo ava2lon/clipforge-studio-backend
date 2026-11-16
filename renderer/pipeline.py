@@ -290,7 +290,8 @@ def _render_with_remotion(source: Path, output: Path, duration: float,
                           source_width: int = 0, source_height: int = 0,
                           caption_style: str = "karaoke", caption_position: str = "bottom",
                           transition: str = "none", transition_duration: float = 0.5,
-                          broll_placements: list[dict[str, Any]] | None = None) -> Path:
+                          broll_placements: list[dict[str, Any]] | None = None,
+                          brand_template: str = "classic") -> Path:
     # Remotion's public/clip.mp4, props file and output path are shared by all workers.
     with _REMOTION_LOCK:
         project = Path(__file__).resolve().parents[1] / "remotion"
@@ -334,6 +335,7 @@ def _render_with_remotion(source: Path, output: Path, duration: float,
                 "transition": transition,
                 "transitionDurationSeconds": transition_duration,
                 "brollOverlays": broll_props,
+                "brandTemplate": brand_template,
             }),
                                   encoding="utf-8")
             rendered.unlink(missing_ok=True)
@@ -551,15 +553,23 @@ def analyze_and_extract(source: Path, output_dir: Path, media: dict[str, Any],
                     cleaned_path.unlink(missing_ok=True)
                     audio_cleanup_status = "fallback_original"
             broll_placements = _broll_placements(candidate.get("captions", []), candidate["duration"], broll_assets)
+            editor_source_dir = output_dir / "editor-source"
+            editor_source_dir.mkdir(parents=True, exist_ok=True)
+            editor_source_path = editor_source_dir / name
+            shutil.copy2(raw_path, editor_source_path)
+            source_width = int(video_stream.get("width", 0))
+            source_height = int(video_stream.get("height", 0))
             path = _render_with_remotion(render_source, output_dir / name, candidate["duration"],
                                          candidate.get("captions", []), aspect_ratio, focus_keyframes,
-                                         int(video_stream.get("width", 0)), int(video_stream.get("height", 0)),
-                                         caption_style, caption_position, transition, transition_duration,
-                                         broll_placements)
+                                         source_width, source_height, caption_style, caption_position,
+                                         transition, transition_duration, broll_placements)
         finally:
             raw_path.unlink(missing_ok=True)
             cleaned_path.unlink(missing_ok=True)
         results.append({**candidate, "name": name, "path": str(path),
+                        "editor_source": f"editor-source/{name}",
+                        "source_width": source_width, "source_height": source_height,
+                        "focus_keyframes": focus_keyframes,
                         "scene_detection": "PySceneDetect",
                         "reframing": "face-aware" if focus_keyframes else "center-fallback",
                         "audio_cleanup": audio_cleanup_status,
