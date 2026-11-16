@@ -6,6 +6,7 @@ import {
   staticFile,
   useCurrentFrame,
   useVideoConfig,
+  interpolate,
 } from "remotion";
 
 type Caption = { start: number; end: number; text: string };
@@ -21,6 +22,8 @@ type ClipForgeProps = {
   sourceHeight: number;
   captionStyle: CaptionStyle;
   captionPosition: CaptionPosition;
+  transition: "none" | "fade";
+  transitionDurationSeconds: number;
 };
 
 const clamp = (value: number, min: number, max: number) =>
@@ -138,16 +141,23 @@ const CaptionOverlay: React.FC<{
 
 const ClipForgeComposition: React.FC<ClipForgeProps> = ({
   captions, focusKeyframes, sourceWidth, sourceHeight, captionStyle, captionPosition,
+  transition, transitionDurationSeconds,
 }) => {
   const frame = useCurrentFrame();
   const { fps, width, height, durationInFrames } = useVideoConfig();
   const focus = focusAt(focusKeyframes, frame / fps);
   const objectPosition = cropPosition(focus, sourceWidth, sourceHeight, width, height);
+  const fadeFrames = transition === "fade" ? Math.max(1, Math.round(transitionDurationSeconds * fps)) : 0;
+  const fadeOutStart = Math.max(fadeFrames + 1, durationInFrames - fadeFrames);
+  const fadeOpacity = (currentFrame: number) => fadeFrames > 0
+    ? interpolate(currentFrame, [0, fadeFrames, fadeOutStart, durationInFrames - 1], [0, 1, 1, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })
+    : 1;
 
   return (
-    <AbsoluteFill style={{ backgroundColor: "#080b12" }}>
+    <AbsoluteFill style={{ backgroundColor: "#080b12", opacity: fadeOpacity(frame) }}>
       <OffthreadVideo
         src={staticFile("clip.mp4")}
+        volume={fadeOpacity}
         style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition }}
       />
       <CaptionOverlay captions={captions} style={captionStyle} position={captionPosition} />
