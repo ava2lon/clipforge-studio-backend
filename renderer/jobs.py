@@ -36,15 +36,20 @@ _RENDER_LOCK = threading.RLock()
 _EDIT_LOCK = threading.RLock()
 
 
-def runtime_metrics() -> dict[str, Any]:
-    disk = shutil.disk_usage(_WORKDIR)
-    active_edits = 0
-    for state_path in _WORKDIR.glob("*/edits/*/edit.json"):
+def _count_active_edit_renders(workdir: Path) -> int:
+    active = 0
+    for state_path in workdir.glob("*/edits/*/edit.json"):
         try:
             state = json.loads(state_path.read_text(encoding="utf-8"))
-            active_edits += state.get("state") in {"QUEUED", "RUNNING"}
+            active += state.get("state") in {"QUEUED", "RUNNING"}
         except (OSError, ValueError):
             continue
+    return active
+
+
+def runtime_metrics() -> dict[str, Any]:
+    disk = shutil.disk_usage(_WORKDIR)
+    active_edits = _count_active_edit_renders(_WORKDIR)
     return {
         "jobs_by_state": _STORE.counts_by_state(),
         "queue": {
@@ -97,14 +102,9 @@ def retry_job(job_id: str) -> dict[str, Any]:
                     raise ValueError("A B-roll asset was not fully staged; resubmit the job")
         except (OSError, json.JSONDecodeError) as exc:
             raise ValueError("Saved job options are unavailable; resubmit the job") from exc
-    active_edits = 0
-    for state_path in _WORKDIR.glob("*/edits/*/edit.json"):
-        try:
-            state = json.loads(state_path.read_text(encoding="utf-8"))
-            active_edits += state.get("state") in {"QUEUED", "RUNNING"}
-        except (OSError, ValueError):
-            continue
-    attempt = _STORE.retry_failed(job_id, max(0, _MAX_ACTIVE_JOBS - active_edits), max_attempts=3)
+    with _EDIT_LOCK:
+        active_edits = _count_active_edit_renders(_WORKDIR)
+        attempt = _STORE.retry_failed(job_id, max(0, _MAX_ACTIVE_JOBS - active_edits), max_attempts=3)
     try:
         _EXECUTOR.submit(_run_job, job_id, None, job_dir, True)
     except Exception as exc:
@@ -137,7 +137,9 @@ def create_job(url: str, workdir: Path, clip_prompt: str | None = None, aspect_r
             ],
         }), encoding="utf-8")
         os.replace(options_tmp, job_dir / "clipforge-options.json")
-        _STORE.create(job_id, f"/download/{job_id}", _MAX_ACTIVE_JOBS)
+        with _EDIT_LOCK:
+            active_edits = _count_active_edit_renders(workdir)
+            _STORE.create(job_id, f"/download/{job_id}", max(0, _MAX_ACTIVE_JOBS - active_edits))
     except Exception:
         import shutil
         shutil.rmtree(job_dir, ignore_errors=True)
@@ -431,16 +433,7 @@ def render_clip_edit(job_id: str, edit_id: str, workdir: Path) -> dict[str, Any]
                 continue
         if active_edits >= 3:
             raise RuntimeError("This job already has three edits queued or rendering")
-        global_active_edits = 0
-        for candidate_dir in workdir.iterdir():
-            if not candidate_dir.is_dir():
-                continue
-            for saved_path in candidate_dir.glob("edits/*/edit.json"):
-                try:
-                    saved_state = json.loads(saved_path.read_text(encoding="utf-8"))
-                    global_active_edits += saved_state.get("state") in {"QUEUED", "RUNNING"}
-                except (OSError, ValueError):
-                    continue
+        global_active_edits = _count_active_edit_renders(workdir)
         if _STORE.count_active() + global_active_edits >= _MAX_ACTIVE_JOBS:
             raise RuntimeError("Studio render queue is full; retry when another job finishes")
         state["state"] = "QUEUED"
