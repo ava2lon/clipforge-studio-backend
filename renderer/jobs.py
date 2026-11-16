@@ -42,7 +42,8 @@ def job_artifact(job_id: str) -> Path | None:
 
 def create_job(url: str, workdir: Path, clip_prompt: str | None = None, aspect_ratio: str = "9:16",
                caption_style: str = "karaoke", caption_position: str = "bottom", audio_cleanup: bool = True,
-               transition: str = "none", transition_duration: float = 0.5,\n               broll_assets: list[dict[str, Any]] | None = None) -> str:
+               transition: str = "none", transition_duration: float = 0.5,
+               broll_assets: list[dict[str, Any]] | None = None) -> str:
     job_id = uuid.uuid4().hex
     job_dir = workdir / job_id
     job_dir.mkdir(parents=True, exist_ok=False)
@@ -56,6 +57,7 @@ def create_job(url: str, workdir: Path, clip_prompt: str | None = None, aspect_r
             "audio_cleanup": bool(audio_cleanup),
             "transition": transition,
             "transition_duration": transition_duration,
+            "broll_assets": broll_assets or [],
         }), encoding="utf-8")
         os.replace(options_tmp, job_dir / "clipforge-options.json")
         _STORE.create(job_id, f"/download/{job_id}", _MAX_ACTIVE_JOBS)
@@ -117,7 +119,8 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
              clip_prompt: str | None = None, aspect_ratio: str | None = None,
              caption_style: str | None = None, caption_position: str | None = None,
              audio_cleanup: bool | None = None, transition: str | None = None,
-             transition_duration: float | None = None,\n             broll_assets: list[dict[str, Any]] | None = None) -> None:
+             transition_duration: float | None = None,
+             broll_assets: list[dict[str, Any]] | None = None) -> None:
     try:
         source = job_dir / "source.media"
         if resume_staged:
@@ -150,6 +153,8 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
                         transition = str(options.get("transition") or "none")
                     if transition_duration is None:
                         transition_duration = float(options.get("transition_duration", 0.5))
+                    if broll_assets is None:
+                        broll_assets = options.get("broll_assets") or []
                 except (OSError, ValueError, TypeError):
                     clip_prompt = None
         aspect_ratio = aspect_ratio or "9:16"
@@ -158,6 +163,28 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
         audio_cleanup = True if audio_cleanup is None else bool(audio_cleanup)
         transition = transition or "none"
         transition_duration = 0.5 if transition_duration is None else float(transition_duration)
+        broll_assets = broll_assets or []
+        staged_broll: list[dict[str, Any]] = []
+        if broll_assets:
+            broll_dir = job_dir / "broll"
+            broll_dir.mkdir(parents=True, exist_ok=True)
+            total_broll_bytes = 0
+            for asset_index, asset in enumerate(broll_assets[:3], 1):
+                target = broll_dir / f"asset-{asset_index:02d}.mp4"
+                if not target.is_file() or target.stat().st_size == 0:
+                    partial = target.with_suffix(".part")
+                    _download(str(asset["url"]), partial)
+                    if partial.stat().st_size > 50_000_000:
+                        partial.unlink(missing_ok=True)
+                        raise PipelineError("Each B-roll asset must be 50MB or smaller")
+                    os.replace(partial, target)
+                total_broll_bytes += target.stat().st_size
+                if total_broll_bytes > 100_000_000:
+                    raise PipelineError("Combined B-roll assets must be 100MB or smaller")
+                asset_media = probe_media(target)
+                if not any(stream.get("codec_type") == "video" for stream in asset_media.get("streams", [])):
+                    raise PipelineError("B-roll assets must contain a video stream")
+                staged_broll.append({"path": str(target), "keywords": asset.get("keywords", [])})
         media = probe_media(source)
         _set(job_id, metrics={"progress": 12, "stage": "Validating media"})
         clips_dir = job_dir / "clips"
@@ -168,7 +195,8 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
             job_id, metrics={"progress": p, "stage": s}
         ), clip_prompt=clip_prompt, aspect_ratio=aspect_ratio,
             caption_style=caption_style, caption_position=caption_position, audio_cleanup=audio_cleanup,
-            transition=transition, transition_duration=transition_duration,\n            broll_assets=staged_broll)
+            transition=transition, transition_duration=transition_duration,
+            broll_assets=staged_broll)
         if not results:
             raise PipelineError("No suitable speech-led clips were found in this source")
         _set(job_id, metrics={"progress": 92, "stage": "Packaging clips"})
