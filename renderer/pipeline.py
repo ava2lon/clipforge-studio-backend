@@ -239,7 +239,8 @@ def _face_focus_keyframes(source: Path, duration: float, sample_limit: int = 600
 def _render_with_remotion(source: Path, output: Path, duration: float,
                           captions: list[dict[str, Any]], aspect_ratio: str = "9:16",
                           focus_keyframes: list[dict[str, float]] | None = None,
-                          source_width: int = 0, source_height: int = 0) -> Path:
+                          source_width: int = 0, source_height: int = 0,
+                          caption_style: str = "karaoke", caption_position: str = "bottom") -> Path:
     # Remotion's public/clip.mp4, props file and output path are shared by all workers.
     with _REMOTION_LOCK:
         project = Path(__file__).resolve().parents[1] / "remotion"
@@ -262,6 +263,8 @@ def _render_with_remotion(source: Path, output: Path, duration: float,
                 "focusKeyframes": focus_keyframes or [],
                 "sourceWidth": source_width,
                 "sourceHeight": source_height,
+                "captionStyle": caption_style,
+                "captionPosition": caption_position,
             }),
                                   encoding="utf-8")
             rendered.unlink(missing_ok=True)
@@ -412,7 +415,8 @@ def analyze_and_extract(source: Path, output_dir: Path, media: dict[str, Any],
         focus_keyframes = _face_focus_keyframes(raw_path, candidate["duration"])
         path = _render_with_remotion(raw_path, output_dir / name, candidate["duration"],
                                      candidate.get("captions", []), aspect_ratio, focus_keyframes,
-                                     int(video_stream.get("width", 0)), int(video_stream.get("height", 0)))
+                                     int(video_stream.get("width", 0)), int(video_stream.get("height", 0)),
+                                     caption_style, caption_position)
         raw_path.unlink(missing_ok=True)
         results.append({**candidate, "name": name, "path": str(path),
                         "scene_detection": "PySceneDetect",
