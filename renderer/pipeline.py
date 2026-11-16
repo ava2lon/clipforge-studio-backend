@@ -93,6 +93,8 @@ def _clean_audio(source: Path, output: Path) -> Path:
         return output_path
     except subprocess.TimeoutExpired as exc:
         raise PipelineError("Audio cleanup exceeded its 15-minute processing limit") from exc
+    except OSError as exc:
+        raise PipelineError("Audio cleanup could not start") from exc
     finally:
         temporary.unlink(missing_ok=True)
 
