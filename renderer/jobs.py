@@ -336,6 +336,7 @@ def create_clip_edit(job_id: str, filename: str, workdir: Path, settings: dict[s
         "settings": settings,
     }
     _write_edit_state(_edit_state_path(job_dir, edit_id), state)
+    _STORE.touch(job_id)
     return state
 
 
@@ -404,6 +405,7 @@ def render_clip_edit(job_id: str, edit_id: str, workdir: Path) -> dict[str, Any]
         state["failure_reason"] = None
         state["updated_at"] = time.time()
         _write_edit_state(_edit_state_path(job_dir, edit_id), state)
+        _STORE.touch(job_id)
         try:
             _EXECUTOR.submit(_run_clip_edit, job_id, edit_id, job_dir)
         except Exception as exc:
@@ -504,6 +506,7 @@ def _run_clip_edit(job_id: str, edit_id: str, job_dir: Path) -> None:
         state["output_filename"] = "rendered.mp4"
         state["updated_at"] = time.time()
         _write_edit_state(state_path, state)
+        _STORE.touch(job_id)
     except Exception as exc:
         for temporary_name in ("trimmed-source.mp4", "cleaned-source.mp4"):
             (state_path.parent / temporary_name).unlink(missing_ok=True)
@@ -513,6 +516,7 @@ def _run_clip_edit(job_id: str, edit_id: str, job_dir: Path) -> None:
             state["failure_reason"] = str(exc)[:1000]
             state["updated_at"] = time.time()
             _write_edit_state(state_path, state)
+            _STORE.touch(job_id)
         except Exception:
             logging.exception("Could not persist failed edit state for %s", edit_id)
         logging.exception("Clip edit render failed for job %s edit %s", job_id, edit_id)
@@ -545,7 +549,8 @@ def _resume_interrupted_jobs() -> None:
 
 
 def _resume_interrupted_edits() -> None:
-    """Resume queued edit renders after a process restart when the parent job is intact."""
+    """Resume queued edit renders without exceeding the global worker admission limit."""
+    available_slots = max(0, _MAX_ACTIVE_JOBS - _STORE.count_active())
     for job_dir in _WORKDIR.iterdir():
         if not job_dir.is_dir() or not re.fullmatch(r"[a-f0-9]{32}", job_dir.name):
             continue
@@ -557,6 +562,8 @@ def _resume_interrupted_edits() -> None:
                 state = json.loads(state_path.read_text(encoding="utf-8"))
                 if state.get("state") not in {"QUEUED", "RUNNING"}:
                     continue
+                if available_slots <= 0:
+                    raise PipelineError("Render was not resumed because the worker queue is full; retry this export")
                 manifest = json.loads((job_dir / "clipforge_manifest.json").read_text(encoding="utf-8"))
                 clip = next((item for item in manifest.get("clips", [])
                              if item.get("name") == state.get("clip_name")), None)
@@ -569,7 +576,9 @@ def _resume_interrupted_edits() -> None:
                 state["state"] = "QUEUED"
                 state["updated_at"] = time.time()
                 _write_edit_state(state_path, state)
+                _STORE.touch(job_dir.name)
                 _EXECUTOR.submit(_run_clip_edit, job_dir.name, state["edit_id"], job_dir)
+                available_slots -= 1
             except Exception as exc:
                 try:
                     state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -577,9 +586,10 @@ def _resume_interrupted_edits() -> None:
                     state["failure_reason"] = ("Automatic edit recovery failed: " + str(exc))[:1000]
                     state["updated_at"] = time.time()
                     _write_edit_state(state_path, state)
+                    _STORE.touch(job_dir.name)
                 except Exception:
                     logging.exception("Could not persist failed edit recovery for %s", state_path)
-                logging.exception("Could not resume editor render %s", state_path)
+                logging.warning("Could not resume editor render %s: %s", state_path, exc)
 
 
 def _cleanup_expired_jobs() -> None:
