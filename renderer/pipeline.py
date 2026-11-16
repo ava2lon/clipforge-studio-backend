@@ -60,6 +60,43 @@ def extract_clip(source: str | Path, output: str | Path, start: float, end: floa
     return dst
 
 
+def _clean_audio(source: Path, output: Path) -> Path:
+    """Denoise, remove low/high rumble and normalize speech loudness."""
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise PipelineError("FFmpeg is required for audio cleanup")
+    source_path, output_path = Path(source).resolve(), Path(output).resolve()
+    if not source_path.is_file():
+        raise PipelineError("Audio cleanup source does not exist")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output_path.with_name(output_path.stem + ".part.mp4")
+    temporary.unlink(missing_ok=True)
+    filters = (
+        "highpass=f=80,"
+        "lowpass=f=12000,"
+        "afftdn=nr=10:nf=-25:tn=1,"
+        "loudnorm=I=-16:TP=-1.5:LRA=11"
+    )
+    try:
+        proc = subprocess.run(
+            [ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+             "-i", str(source_path), "-map", "0:v:0", "-map", "0:a:0",
+             "-c:v", "copy", "-af", filters, "-c:a", "aac", "-b:a", "160k",
+             "-ar", "48000", "-map_metadata", "0", "-movflags", "+faststart",
+             str(temporary)],
+            capture_output=True, text=True, timeout=900, check=False,
+        )
+        if proc.returncode or not temporary.is_file() or temporary.stat().st_size == 0:
+            detail = (proc.stderr or "FFmpeg produced no cleaned audio output")[-1200:]
+            raise PipelineError("Audio cleanup failed: " + detail)
+        os.replace(temporary, output_path)
+        return output_path
+    except subprocess.TimeoutExpired as exc:
+        raise PipelineError("Audio cleanup exceeded its 15-minute processing limit") from exc
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def _transcribe(source: Path) -> list[dict[str, Any]]:
     try:
         import whisperx
@@ -386,7 +423,7 @@ def _rank_candidates(segments: list[dict[str, Any]], scenes: list[float],
 def analyze_and_extract(source: Path, output_dir: Path, media: dict[str, Any],
                         progress: Callable[[int, str], None] = lambda *_: None,
                         clip_prompt: str | None = None, aspect_ratio: str = "9:16",
-                        caption_style: str = "karaoke", caption_position: str = "bottom") -> list[dict[str, Any]]:
+                        caption_style: str = "karaoke", caption_position: str = "bottom",\n                        audio_cleanup: bool = True) -> list[dict[str, Any]]:
     _aspect_dimensions(aspect_ratio)
     duration = float(media.get("format", {}).get("duration", 0))
     if duration <= 0:
@@ -414,14 +451,29 @@ def analyze_and_extract(source: Path, output_dir: Path, media: dict[str, Any],
         raw_path = extract_clip(source, output_dir / f"raw-{name}", candidate["start"], candidate["end"])
         video_stream = next(stream for stream in streams if stream.get("codec_type") == "video")
         focus_keyframes = _face_focus_keyframes(raw_path, candidate["duration"])
-        path = _render_with_remotion(raw_path, output_dir / name, candidate["duration"],
-                                     candidate.get("captions", []), aspect_ratio, focus_keyframes,
-                                     int(video_stream.get("width", 0)), int(video_stream.get("height", 0)),
-                                     caption_style, caption_position)
-        raw_path.unlink(missing_ok=True)
+        cleaned_path = output_dir / f"cleaned-{name}"
+        render_source = raw_path
+        audio_cleanup_status = "disabled"
+        try:
+            if audio_cleanup:
+                try:
+                    render_source = _clean_audio(raw_path, cleaned_path)
+                    audio_cleanup_status = "applied"
+                except PipelineError:
+                    # Preserve the original clip if optional cleanup is unavailable or fails.
+                    cleaned_path.unlink(missing_ok=True)
+                    audio_cleanup_status = "fallback_original"
+            path = _render_with_remotion(render_source, output_dir / name, candidate["duration"],
+                                         candidate.get("captions", []), aspect_ratio, focus_keyframes,
+                                         int(video_stream.get("width", 0)), int(video_stream.get("height", 0)),
+                                         caption_style, caption_position)
+        finally:
+            raw_path.unlink(missing_ok=True)
+            cleaned_path.unlink(missing_ok=True)
         results.append({**candidate, "name": name, "path": str(path),
                         "scene_detection": "PySceneDetect",
                         "reframing": "face-aware" if focus_keyframes else "center-fallback",
+                        "audio_cleanup": audio_cleanup_status,
                         "silence_analysis": "Auto-Editor" if active_ranges else "no_ranges_or_unavailable"})
         progress(72 + int(18 * index / len(candidates)), f"Rendering clip {index}/{len(candidates)} with FFmpeg")
     return results
