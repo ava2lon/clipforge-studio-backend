@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, HttpUrl
 
 from renderer.capabilities import collect_capabilities
@@ -138,6 +139,40 @@ def download(job_id: str, x_api_key: str | None = Header(default=None)):
         raise HTTPException(status_code=409, detail="Job artifact is not ready")
     from fastapi.responses import FileResponse
     return FileResponse(artifact, media_type="application/zip", filename=f"clipforge-{job_id}.zip")
+
+
+@app.get("/manifest/{job_id}")
+def manifest(job_id: str, x_api_key: str | None = Header(default=None)) -> dict[str, Any]:
+    _authorize(x_api_key)
+    _validate_job_id(job_id)
+    job = get_job(job_id)
+    if not job or job.get("state") != "COMPLETED":
+        raise HTTPException(status_code=409, detail="Completed job manifest is not available")
+    manifest_path = (WORKDIR / job_id / "clipforge_manifest.json").resolve()
+    if not _inside_workdir(manifest_path) or not manifest_path.is_file():
+        raise HTTPException(status_code=404, detail="Job manifest is unavailable")
+    import json
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail="Job manifest could not be read") from exc
+    return payload
+
+
+@app.get("/clip/{job_id}/{filename}")
+def clip_file(job_id: str, filename: str, x_api_key: str | None = Header(default=None)):
+    _authorize(x_api_key)
+    _validate_job_id(job_id)
+    if not re.fullmatch(r"clip-[0-9]{2}\\.mp4", filename):
+        raise HTTPException(status_code=400, detail="Invalid clip filename")
+    job = get_job(job_id)
+    if not job or job.get("state") != "COMPLETED":
+        raise HTTPException(status_code=409, detail="Completed clip is not available")
+    clip_path = (WORKDIR / job_id / "clips" / filename).resolve()
+    if not _inside_workdir(clip_path) or not clip_path.is_file():
+        raise HTTPException(status_code=404, detail="Clip asset not found")
+    return FileResponse(clip_path, media_type="video/mp4", filename=filename,
+                        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
 
 
 @app.post("/media/probe")
