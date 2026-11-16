@@ -280,7 +280,7 @@ def _render_with_remotion(source: Path, output: Path, duration: float,
                           captions: list[dict[str, Any]], aspect_ratio: str = "9:16",
                           focus_keyframes: list[dict[str, float]] | None = None,
                           source_width: int = 0, source_height: int = 0,
-                          caption_style: str = "karaoke", caption_position: str = "bottom") -> Path:
+                          caption_style: str = "karaoke", caption_position: str = "bottom",\n                          transition: str = "none", transition_duration: float = 0.5) -> Path:
     # Remotion's public/clip.mp4, props file and output path are shared by all workers.
     with _REMOTION_LOCK:
         project = Path(__file__).resolve().parents[1] / "remotion"
