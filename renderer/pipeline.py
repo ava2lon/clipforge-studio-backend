@@ -289,7 +289,8 @@ def _render_with_remotion(source: Path, output: Path, duration: float,
                           focus_keyframes: list[dict[str, float]] | None = None,
                           source_width: int = 0, source_height: int = 0,
                           caption_style: str = "karaoke", caption_position: str = "bottom",
-                          transition: str = "none", transition_duration: float = 0.5,\n                          broll_placements: list[dict[str, Any]] | None = None) -> Path:
+                          transition: str = "none", transition_duration: float = 0.5,
+                          broll_placements: list[dict[str, Any]] | None = None) -> Path:
     # Remotion's public/clip.mp4, props file and output path are shared by all workers.
     with _REMOTION_LOCK:
         project = Path(__file__).resolve().parents[1] / "remotion"
@@ -483,7 +484,8 @@ def analyze_and_extract(source: Path, output_dir: Path, media: dict[str, Any],
                         clip_prompt: str | None = None, aspect_ratio: str = "9:16",
                         caption_style: str = "karaoke", caption_position: str = "bottom",
                         audio_cleanup: bool = True, transition: str = "none",
-                        transition_duration: float = 0.5) -> list[dict[str, Any]]:
+                        transition_duration: float = 0.5,
+                        broll_assets: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     _aspect_dimensions(aspect_ratio)
     transition_duration = _validate_transition_options(transition, transition_duration)
     duration = float(media.get("format", {}).get("duration", 0))
@@ -524,10 +526,12 @@ def analyze_and_extract(source: Path, output_dir: Path, media: dict[str, Any],
                     # Preserve the original clip if optional cleanup is unavailable or fails.
                     cleaned_path.unlink(missing_ok=True)
                     audio_cleanup_status = "fallback_original"
-            broll_placements = _broll_placements(candidate.get("captions", []), candidate["duration"], broll_assets)\n            path = _render_with_remotion(render_source, output_dir / name, candidate["duration"],
+            broll_placements = _broll_placements(candidate.get("captions", []), candidate["duration"], broll_assets)
+            path = _render_with_remotion(render_source, output_dir / name, candidate["duration"],
                                          candidate.get("captions", []), aspect_ratio, focus_keyframes,
                                          int(video_stream.get("width", 0)), int(video_stream.get("height", 0)),
-                                         caption_style, caption_position, transition, transition_duration,\n                                         broll_placements)
+                                         caption_style, caption_position, transition, transition_duration,
+                                         broll_placements)
         finally:
             raw_path.unlink(missing_ok=True)
             cleaned_path.unlink(missing_ok=True)
@@ -536,7 +540,8 @@ def analyze_and_extract(source: Path, output_dir: Path, media: dict[str, Any],
                         "reframing": "face-aware" if focus_keyframes else "center-fallback",
                         "audio_cleanup": audio_cleanup_status,
                         "transition": transition,
-                        "transition_duration_seconds": transition_duration,\n                        "broll_placements": [{k: v for k, v in item.items() if k != "path"} for item in broll_placements],
+                        "transition_duration_seconds": transition_duration,
+                        "broll_placements": [{k: v for k, v in item.items() if k != "path"} for item in broll_placements],
                         "silence_analysis": "Auto-Editor" if active_ranges else "no_ranges_or_unavailable"})
         progress(72 + int(18 * index / len(candidates)), f"Rendering clip {index}/{len(candidates)} with FFmpeg")
     return results
