@@ -279,7 +279,7 @@ def create_clip_edit(job_id: str, filename: str, workdir: Path, settings: dict[s
     duration = float(clip.get("duration", 0))
     trim_start = float(settings["trim_start"])
     trim_end = float(settings["trim_end"])
-    if duration <= 0 or trim_start < 0 or trim_end <= trim_start or trim_end > duration + 0.05:
+    if duration <= 0 or trim_start < 0 or trim_end <= trim_start or trim_end > duration:
         raise ValueError("Trim range must be inside the source clip and at least 0.25 seconds long")
     if trim_end - trim_start < 0.25:
         raise ValueError("Edited clips must be at least 0.25 seconds long")
@@ -288,8 +288,11 @@ def create_clip_edit(job_id: str, filename: str, workdir: Path, settings: dict[s
         raise ValueError("A maximum of 300 caption words is allowed")
     for caption in captions:
         start, end = float(caption["start"]), float(caption["end"])
-        if start < 0 or end <= start or end > duration + 0.05:
+        if not str(caption.get("text", "")).strip():
+            raise ValueError("Caption text cannot be blank")
+        if start < 0 or end <= start or end > duration:
             raise ValueError("Caption timestamps must fall within the original clip")
+    settings["captions"] = sorted(captions, key=lambda item: (float(item["start"]), float(item["end"])))
     edits_root = job_dir / "edits"
     if edits_root.exists() and sum(1 for item in edits_root.iterdir() if item.is_dir()) >= 20:
         raise ValueError("This job has reached its 20 saved edit versions limit")
@@ -332,6 +335,15 @@ def render_clip_edit(job_id: str, edit_id: str, workdir: Path) -> dict[str, Any]
             raise FileNotFoundError("Saved edit not found")
         if state.get("state") in {"QUEUED", "RUNNING"}:
             return state
+        active_edits = 0
+        for saved_path in (job_dir / "edits").glob("*/edit.json"):
+            try:
+                saved_state = json.loads(saved_path.read_text(encoding="utf-8"))
+                active_edits += saved_state.get("state") in {"QUEUED", "RUNNING"}
+            except (OSError, ValueError):
+                continue
+        if active_edits >= 3:
+            raise RuntimeError("This job already has three edits queued or rendering")
         state["state"] = "QUEUED"
         state["failure_reason"] = None
         state["updated_at"] = time.time()
