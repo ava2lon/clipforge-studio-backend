@@ -117,6 +117,7 @@ def retry_job(job_id: str) -> dict[str, Any]:
 def create_job(url: str, workdir: Path, clip_prompt: str | None = None, aspect_ratio: str = "9:16",
                caption_style: str = "karaoke", caption_position: str = "bottom", audio_cleanup: bool = True,
                transition: str = "none", transition_duration: float = 0.5,
+               max_source_duration_seconds: float | None = None,
                broll_assets: list[dict[str, Any]] | None = None) -> str:
     job_id = uuid.uuid4().hex
     job_dir = workdir / job_id
@@ -131,6 +132,7 @@ def create_job(url: str, workdir: Path, clip_prompt: str | None = None, aspect_r
             "audio_cleanup": bool(audio_cleanup),
             "transition": transition,
             "transition_duration": transition_duration,
+            "max_source_duration_seconds": max_source_duration_seconds,
             "broll_assets": [
                 {"filename": f"asset-{index:02d}.mp4", "keywords": asset.get("keywords", [])}
                 for index, asset in enumerate(broll_assets or [], 1)
@@ -145,7 +147,8 @@ def create_job(url: str, workdir: Path, clip_prompt: str | None = None, aspect_r
         shutil.rmtree(job_dir, ignore_errors=True)
         raise
     try:
-        _EXECUTOR.submit(_run_job, job_id, url, job_dir, broll_assets=broll_assets or [])
+        _EXECUTOR.submit(_run_job, job_id, url, job_dir, broll_assets=broll_assets or [],
+                         max_source_duration_seconds=max_source_duration_seconds)
     except Exception as exc:
         _STORE.update(job_id, state="FAILED", failure_reason="Worker submission failed",
                       metrics={"progress": 100, "stage": "Worker unavailable"})
@@ -199,7 +202,9 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
              caption_style: str | None = None, caption_position: str | None = None,
              audio_cleanup: bool | None = None, transition: str | None = None,
              transition_duration: float | None = None,
-             broll_assets: list[dict[str, Any]] | None = None) -> None:
+             broll_assets: list[dict[str, Any]] | None = None,
+             max_source_duration_seconds: float | None = None) -> None:
+    source_duration_seconds: float | None = None
     try:
         source = job_dir / "source.media"
         if resume_staged:
@@ -213,7 +218,7 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
             partial = job_dir / "source.media.part"
             _download(url, partial)
             os.replace(partial, source)
-        if clip_prompt is None or aspect_ratio is None or caption_style is None or caption_position is None or audio_cleanup is None or transition is None or transition_duration is None or broll_assets is None:
+        if clip_prompt is None or aspect_ratio is None or caption_style is None or caption_position is None or audio_cleanup is None or transition is None or transition_duration is None or broll_assets is None or max_source_duration_seconds is None:
             options_path = job_dir / "clipforge-options.json"
             if options_path.is_file():
                 try:
@@ -232,6 +237,9 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
                         transition = str(options.get("transition") or "none")
                     if transition_duration is None:
                         transition_duration = float(options.get("transition_duration", 0.5))
+                    if max_source_duration_seconds is None:
+                        saved_max_duration = options.get("max_source_duration_seconds")
+                        max_source_duration_seconds = float(saved_max_duration) if saved_max_duration is not None else None
                     if broll_assets is None:
                         broll_assets = options.get("broll_assets") or []
                 except (OSError, ValueError, TypeError):
@@ -269,13 +277,18 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
                 staged_broll.append({"path": str(target), "keywords": asset.get("keywords", []),
                                      "duration": float(asset_media.get("format", {}).get("duration", 0))})
         media = probe_media(source)
-        _set(job_id, metrics={"progress": 12, "stage": "Validating media"})
+        source_duration_seconds = float(media.get("format", {}).get("duration", 0))
+        if source_duration_seconds <= 0:
+            raise PipelineError("Source media has no valid positive duration")
+        if max_source_duration_seconds is not None and source_duration_seconds > max_source_duration_seconds + 0.05:
+            raise PipelineError("Source duration exceeds the remaining plan allocation; upgrade your plan or use a shorter source")
+        _set(job_id, metrics={"progress": 12, "stage": "Validating media", "source_duration_seconds": source_duration_seconds})
         clips_dir = job_dir / "clips"
         import shutil
         shutil.rmtree(clips_dir, ignore_errors=True)
         clips_dir.mkdir(parents=True, exist_ok=True)
         results = analyze_and_extract(source, clips_dir, media, progress=lambda p, s: _set(
-            job_id, metrics={"progress": p, "stage": s}
+            job_id, metrics={"progress": p, "stage": s, "source_duration_seconds": source_duration_seconds}
         ), clip_prompt=clip_prompt, aspect_ratio=aspect_ratio,
             caption_style=caption_style, caption_position=caption_position, audio_cleanup=audio_cleanup,
             transition=transition, transition_duration=transition_duration,
@@ -304,10 +317,10 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
                 bundle.write(item["path"], arcname=Path(item["path"]).name)
             bundle.writestr("clipforge_manifest.json", manifest_json)
         _STORE.update(job_id, artifact_path=archive, state="COMPLETED",
-                      metrics={"progress": 100, "stage": "Clips ready"})
+                      metrics={"progress": 100, "stage": "Clips ready", "source_duration_seconds": source_duration_seconds})
     except Exception as exc:
         _set(job_id, state="FAILED", failure_reason=str(exc)[:1000],
-             metrics={"progress": 100, "stage": "Processing failed"})
+             metrics={"progress": 100, "stage": "Processing failed", **({"source_duration_seconds": source_duration_seconds} if source_duration_seconds is not None else {})})
 
 
 
