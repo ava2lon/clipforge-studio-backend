@@ -87,7 +87,7 @@ def submit_clip(request: ClipRequest, x_api_key: str | None = Header(default=Non
     _authorize(x_api_key)
     url = str(request.media)
     try:
-        ensure_supported_ingestion_source(url)
+        source_type = ensure_supported_ingestion_source(url)
     except SourceAccessRequired as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
@@ -96,7 +96,7 @@ def submit_clip(request: ClipRequest, x_api_key: str | None = Header(default=Non
         job_id = create_job(url, WORKDIR)
     except RuntimeError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
-    return {"job_id": job_id, "status_url": f"/status/{job_id}", "download_url": f"/download/{job_id}"}
+    return {"job_id": job_id, "source_type": source_type, "status_url": f"/status/{job_id}", "download_url": f"/download/{job_id}"}
 
 
 @app.get("/status/{job_id}")
