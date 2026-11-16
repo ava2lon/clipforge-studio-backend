@@ -1,0 +1,113 @@
+name: Real media end-to-end pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_url:
+        description: "Public HTTPS MP4 URL with at least 20 seconds of speech"
+        required: true
+        default: "https://cdn.jsdelivr.net/gh/dlaneycreative-design/studio-open@main/biscuit/biscuit-from-stray-dog-to-superhero.mp4"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clipforge-real-media-e2e
+  cancel-in-progress: false
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Validate required secret
+        env:
+          API_KEY: ${{ secrets.AVA2LON_STUDIO_API_KEY }}
+        run: |
+          if [ -z "$API_KEY" ]; then
+            echo "::error::GitHub Actions secret AVA2LON_STUDIO_API_KEY is not configured."
+            exit 1
+          fi
+
+      - name: Submit real media job
+        id: submit
+        env:
+          API_KEY: ${{ secrets.AVA2LON_STUDIO_API_KEY }}
+          SOURCE_URL: ${{ inputs.source_url }}
+          BASE_URL: https://ava2lon-studio.hf.space
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 60 \
+            -X POST "$BASE_URL/clips" \
+            -H "X-API-Key: $API_KEY" \
+            -H "Content-Type: application/json" \
+            --data "$(python -c 'import json,os; print(json.dumps({"media":os.environ["SOURCE_URL"]}))')" \
+            -o /tmp/submit.json
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          data = json.load(open("/tmp/submit.json"))
+          print("job_id=" + data["job_id"])
+          print("source_type=" + data["source_type"])
+          PY
+          cat /tmp/submit.json
+
+      - name: Poll job until terminal state
+        env:
+          API_KEY: ${{ secrets.AVA2LON_STUDIO_API_KEY }}
+          BASE_URL: https://ava2lon-studio.hf.space
+          JOB_ID: ${{ steps.submit.outputs.job_id }}
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 6900))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            code="$(curl --silent --show-error --max-time 60 -o /tmp/status.json -w '%{http_code}' \
+              -H "X-API-Key: $API_KEY" "$BASE_URL/status/$JOB_ID" || true)"
+            if [ "$code" != "200" ]; then
+              echo "Status request returned HTTP $code"
+              [ ! -f /tmp/status.json ] || cat /tmp/status.json
+              sleep 20
+              continue
+            fi
+            state="$(python -c 'import json; print(json.load(open("/tmp/status.json")).get("state",""))')"
+            cat /tmp/status.json
+            case "$state" in
+              COMPLETED) exit 0 ;;
+              FAILED)
+                echo "::error::ClipForge processing failed."
+                exit 1
+                ;;
+            esac
+            sleep 20
+          done
+          echo "::error::ClipForge job exceeded the 115-minute test deadline."
+          exit 1
+
+      - name: Download and validate rendered artifacts
+        env:
+          API_KEY: ${{ secrets.AVA2LON_STUDIO_API_KEY }}
+          BASE_URL: https://ava2lon-studio.hf.space
+          JOB_ID: ${{ steps.submit.outputs.job_id }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 600 \
+            -H "X-API-Key: $API_KEY" "$BASE_URL/download/$JOB_ID" -o /tmp/clips.zip
+          python - <<'PY'
+          import json, zipfile
+          from pathlib import Path
+          archive = zipfile.ZipFile("/tmp/clips.zip")
+          names = archive.namelist()
+          clips = [n for n in names if n.lower().endswith(".mp4")]
+          assert clips, f"No MP4 clips in archive: {names}"
+          assert "clipforge_manifest.json" in names, f"Manifest missing: {names}"
+          manifest = json.loads(archive.read("clipforge_manifest.json"))
+          assert manifest.get("clips"), "Manifest contains no clip records"
+          for name in clips:
+              info = archive.getinfo(name)
+              assert info.file_size > 0, f"Empty artifact: {name}"
+          print(json.dumps({
+              "archive_bytes": Path("/tmp/clips.zip").stat().st_size,
+              "clip_files": clips,
+              "manifest_clip_count": len(manifest["clips"]),
+              "analysis": manifest.get("analysis"),
+          }, indent=2))
+          PY
