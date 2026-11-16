@@ -255,7 +255,14 @@ def _render_with_remotion(source: Path, output: Path, duration: float,
         rendered = render_dir / "clipforge.mp4"
         try:
             shutil.copy2(source, public_media)
-            props_path.write_text(json.dumps({"durationSeconds": duration, "captions": captions, "aspectRatio": aspect_ratio,\n                                              "focusKeyframes": focus_keyframes or [],\n                                              "sourceWidth": source_width, "sourceHeight": source_height}),
+            props_path.write_text(json.dumps({
+                "durationSeconds": duration,
+                "captions": captions,
+                "aspectRatio": aspect_ratio,
+                "focusKeyframes": focus_keyframes or [],
+                "sourceWidth": source_width,
+                "sourceHeight": source_height,
+            }),
                                   encoding="utf-8")
             rendered.unlink(missing_ok=True)
             proc = subprocess.run(
