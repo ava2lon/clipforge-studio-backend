@@ -383,7 +383,7 @@ def _broll_placements(captions: list[dict[str, Any]], duration: float,
             if not keywords.intersection(tokens):
                 continue
             start = max(0.0, float(caption.get("start", 0.0)) - 0.35)
-            overlay_duration = min(4.0, max(0.0, duration - start))
+            overlay_duration = min(4.0, float(asset.get("duration", 4.0)), max(0.0, duration - start))
             end = start + overlay_duration
             if overlay_duration < 0.75:
                 continue
