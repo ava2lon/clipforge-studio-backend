@@ -72,6 +72,7 @@ def _clean_audio(source: Path, output: Path) -> Path:
     temporary = output_path.with_name(output_path.stem + ".part.mp4")
     temporary.unlink(missing_ok=True)
     filters = (
+        "aresample=48000,"
         "highpass=f=80,"
         "lowpass=f=12000,"
         "afftdn=nr=10:nf=-25:tn=1,"
