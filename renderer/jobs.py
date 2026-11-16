@@ -40,11 +40,14 @@ def job_artifact(job_id: str) -> Path | None:
     return _STORE.artifact(job_id)
 
 
-def create_job(url: str, workdir: Path) -> str:
+def create_job(url: str, workdir: Path, clip_prompt: str | None = None) -> str:
     job_id = uuid.uuid4().hex
     job_dir = workdir / job_id
     job_dir.mkdir(parents=True, exist_ok=False)
     try:
+        options_tmp = job_dir / "clipforge-options.json.part"
+        options_tmp.write_text(json.dumps({"clip_prompt": (clip_prompt or "").strip()[:500]}), encoding="utf-8")
+        os.replace(options_tmp, job_dir / "clipforge-options.json")
         _STORE.create(job_id, f"/download/{job_id}", _MAX_ACTIVE_JOBS)
     except Exception:
         import shutil
@@ -100,7 +103,8 @@ def _download(url: str, target: Path) -> None:
         raise PipelineError("Downloaded source is empty")
 
 
-def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = False) -> None:
+def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = False,
+             clip_prompt: str | None = None) -> None:
     try:
         source = job_dir / "source.media"
         if resume_staged:
@@ -114,6 +118,13 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
             partial = job_dir / "source.media.part"
             _download(url, partial)
             os.replace(partial, source)
+        if clip_prompt is None:
+            options_path = job_dir / "clipforge-options.json"
+            if options_path.is_file():
+                try:
+                    clip_prompt = str(json.loads(options_path.read_text(encoding="utf-8")).get("clip_prompt") or "") or None
+                except (OSError, ValueError, TypeError):
+                    clip_prompt = None
         media = probe_media(source)
         _set(job_id, metrics={"progress": 12, "stage": "Validating media"})
         clips_dir = job_dir / "clips"
@@ -122,7 +133,7 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
         clips_dir.mkdir(parents=True, exist_ok=True)
         results = analyze_and_extract(source, clips_dir, media, progress=lambda p, s: _set(
             job_id, metrics={"progress": p, "stage": s}
-        ))
+        ), clip_prompt=clip_prompt)
         if not results:
             raise PipelineError("No suitable speech-led clips were found in this source")
         _set(job_id, metrics={"progress": 92, "stage": "Packaging clips"})
@@ -137,7 +148,8 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
                 "analysis": {"transcription": "WhisperX", "scene_detection": "PySceneDetect",
                              "auto_editor_silence_analysis": all(
                                  x["silence_analysis"] == "Auto-Editor" for x in results
-                             ), "selection": "transcript density, hook terms, audio activity, and overlap suppression",
+                             ), "selection": "explainable 0-100 heuristic score: speech density, hook strength, context completeness, ending strength, scene alignment, audio activity, and optional prompt relevance",
+                             "clip_prompt": clip_prompt or None,
                              "rendering": "Remotion captions and FFmpeg encoding"},
             }, indent=2))
         _STORE.update(job_id, artifact_path=archive, state="COMPLETED",
