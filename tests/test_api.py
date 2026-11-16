@@ -33,14 +33,15 @@ def test_clip_submission_requires_api_key(monkeypatch):
     assert response.status_code == 401
 
 
-def test_clip_submission_rejects_non_supabase_source(monkeypatch):
+def test_clip_submission_requires_authorized_social_source(monkeypatch):
     monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
     response = client.post(
         "/clips",
         headers={"X-API-Key": "test-secret"},
-        json={"media": "https://example.com/source.mp4"},
+        json={"media": "https://www.youtube.com/watch?v=abc123"},
     )
-    assert response.status_code == 400
+    assert response.status_code == 422
+    assert "authorized provider API" in response.json()["detail"]
 
 
 
@@ -53,7 +54,6 @@ def test_clip_submission_rejects_unsafe_supabase_urls(monkeypatch):
         "https://project.supabase.co:8443/storage/v1/object/sign/videos/source.mp4?token=test",
         "https://project.supabase.co/storage/v1/object/sign/videos/source.mp4#fragment",
         "https://project.supabase.co/rest/v1/users?select=*",
-        "https://project.supabase.co.evil.test/storage/v1/object/sign/videos/source.mp4?token=test",
     ]
     for media in unsafe_urls:
         response = client.post("/clips", headers=headers, json={"media": media})
@@ -76,4 +76,27 @@ def test_status_rejects_non_hex_job_id(monkeypatch):
 def test_download_rejects_non_hex_job_id(monkeypatch):
     monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
     response = client.get("/download/" + "g" * 32, headers={"X-API-Key": "test-secret"})
+    assert response.status_code == 400
+
+
+def test_clip_submission_accepts_direct_https_mp4_url(monkeypatch):
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    monkeypatch.setattr("api.create_job", lambda url, workdir: "a" * 32)
+    response = client.post(
+        "/clips",
+        headers={"X-API-Key": "test-secret"},
+        json={"media": "https://cdn.example.net/video.mp4"},
+    )
+    assert response.status_code == 202
+    assert response.json()["job_id"] == "a" * 32
+    assert response.json()["source_type"] == "direct_http_video"
+
+
+def test_clip_submission_rejects_direct_url_with_credentials(monkeypatch):
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    response = client.post(
+        "/clips",
+        headers={"X-API-Key": "test-secret"},
+        json={"media": "https://user:pass@cdn.example.net/video.mp4"},
+    )
     assert response.status_code == 400
