@@ -110,7 +110,8 @@ def _download(url: str, target: Path) -> None:
 
 
 def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = False,
-             clip_prompt: str | None = None, aspect_ratio: str | None = None,\n             caption_style: str | None = None, caption_position: str | None = None) -> None:
+             clip_prompt: str | None = None, aspect_ratio: str | None = None,
+             caption_style: str | None = None, caption_position: str | None = None) -> None:
     try:
         source = job_dir / "source.media"
         if resume_staged:
@@ -133,6 +134,10 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
                         clip_prompt = str(options.get("clip_prompt") or "") or None
                     if aspect_ratio is None:
                         aspect_ratio = str(options.get("aspect_ratio") or "9:16")
+                    if caption_style is None:
+                        caption_style = str(options.get("caption_style") or "karaoke")
+                    if caption_position is None:
+                        caption_position = str(options.get("caption_position") or "bottom")
                 except (OSError, ValueError, TypeError):
                     clip_prompt = None
         aspect_ratio = aspect_ratio or "9:16"
@@ -146,7 +151,8 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
         clips_dir.mkdir(parents=True, exist_ok=True)
         results = analyze_and_extract(source, clips_dir, media, progress=lambda p, s: _set(
             job_id, metrics={"progress": p, "stage": s}
-        ), clip_prompt=clip_prompt, aspect_ratio=aspect_ratio,\n            caption_style=caption_style, caption_position=caption_position)
+        ), clip_prompt=clip_prompt, aspect_ratio=aspect_ratio,
+            caption_style=caption_style, caption_position=caption_position)
         if not results:
             raise PipelineError("No suitable speech-led clips were found in this source")
         _set(job_id, metrics={"progress": 92, "stage": "Packaging clips"})
@@ -162,7 +168,8 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
                              "auto_editor_silence_analysis": all(
                                  x["silence_analysis"] == "Auto-Editor" for x in results
                              ), "selection": "explainable 0-100 heuristic score: speech density, hook strength, context completeness, ending strength, scene alignment, audio activity, and optional prompt relevance",
-                             "clip_prompt": clip_prompt or None, "aspect_ratio": aspect_ratio,\n                              "caption_style": caption_style, "caption_position": caption_position,
+                             "clip_prompt": clip_prompt or None, "aspect_ratio": aspect_ratio,
+                              "caption_style": caption_style, "caption_position": caption_position,
                              "rendering": "Remotion captions and FFmpeg encoding"},
             }, indent=2))
         _STORE.update(job_id, artifact_path=archive, state="COMPLETED",
