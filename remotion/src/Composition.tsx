@@ -140,7 +140,7 @@ const ClipForgeComposition: React.FC<ClipForgeProps> = ({
   captions, focusKeyframes, sourceWidth, sourceHeight, captionStyle, captionPosition,
 }) => {
   const frame = useCurrentFrame();
-  const { fps, width, height } = useVideoConfig();
+  const { fps, width, height, durationInFrames } = useVideoConfig();
   const focus = focusAt(focusKeyframes, frame / fps);
   const objectPosition = cropPosition(focus, sourceWidth, sourceHeight, width, height);
 
@@ -163,7 +163,7 @@ export const RemotionRoot: React.FC = () => (
     fps={30}
     width={1080}
     height={1920}
-    defaultProps={{ durationSeconds: 5, captions: [], aspectRatio: "9:16", focusKeyframes: [], sourceWidth: 0, sourceHeight: 0, captionStyle: "karaoke", captionPosition: "bottom" }}
+    defaultProps={{ durationSeconds: 5, captions: [], aspectRatio: "9:16", focusKeyframes: [], sourceWidth: 0, sourceHeight: 0, captionStyle: "karaoke", captionPosition: "bottom", transition: "none", transitionDurationSeconds: 0.5 }}
     calculateMetadata={({ props }) => {
       const dimensions = props.aspectRatio === "16:9" ? { width: 1920, height: 1080 }
         : props.aspectRatio === "1:1" ? { width: 1080, height: 1080 }
