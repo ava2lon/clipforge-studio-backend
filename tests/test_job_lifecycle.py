@@ -76,6 +76,7 @@ def test_submit_process_status_and_download_complete_lifecycle(tmp_path, monkeyp
     assert status.status_code == 200
     assert status.json()["state"] == "COMPLETED"
     assert status.json()["metrics"]["progress"] == 100
+    assert status.json()["metrics"]["source_duration_seconds"] == 42.0
 
     download = client.get(
         f"/download/{job_id}", headers={"X-API-Key": "integration-secret"}
@@ -109,3 +110,38 @@ def test_submit_process_status_and_download_complete_lifecycle(tmp_path, monkeyp
     with zipfile.ZipFile(archive_path) as archive:
         assert archive.testzip() is None
         assert archive.read("clip-01.mp4") == b"synthetic-rendered-clip"
+
+
+
+def test_source_duration_ceiling_rejects_over_quota_media_before_analysis(tmp_path, monkeypatch):
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    store = JobStore(tmp_path / "jobs.sqlite3")
+    monkeypatch.setattr(jobs, "_STORE", store)
+    monkeypatch.setattr(jobs, "_EXECUTOR", ImmediateExecutor())
+
+    def fake_download(_url, target):
+        target.write_bytes(b"synthetic-source-media")
+
+    def fake_probe(_source):
+        return {
+            "format": {"duration": "42.0"},
+            "streams": [{"codec_type": "video", "width": 1280, "height": 720}],
+        }
+
+    def analysis_must_not_run(*_args, **_kwargs):
+        raise AssertionError("analysis must not run after the reserved duration ceiling is exceeded")
+
+    monkeypatch.setattr(jobs, "_download", fake_download)
+    monkeypatch.setattr(jobs, "probe_media", fake_probe)
+    monkeypatch.setattr(jobs, "analyze_and_extract", analysis_must_not_run)
+
+    job_id = jobs.create_job(
+        "https://cdn.example.net/source.mp4",
+        workdir,
+        max_source_duration_seconds=30,
+    )
+    state = jobs.get_job(job_id)
+    assert state["state"] == "FAILED"
+    assert "exceeds the remaining plan allocation" in state["failure_reason"]
+    assert state["metrics"]["source_duration_seconds"] == 42.0
