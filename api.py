@@ -38,7 +38,6 @@ class ClipRequest(BaseModel):
     transition: Literal["none", "fade"] = Field(default="none", description="Fade video and audio at clip boundaries")
     transition_duration: float = Field(default=0.5, ge=0.0, le=1.5, description="Fade duration in seconds; maximum 1.5")
     broll_assets: list[BrollAssetRequest] = Field(default_factory=list, max_length=3)
-    broll_assets: list[BrollAssetRequest] = Field(default_factory=list, max_length=3)
 
 
 class ProbeRequest(BaseModel):
@@ -100,6 +99,12 @@ def capabilities() -> dict[str, Any]:
 def submit_clip(request: ClipRequest, x_api_key: str | None = Header(default=None)) -> dict[str, str]:
     _authorize(x_api_key)
     url = str(request.media)
+    for asset in request.broll_assets:
+        asset_url = str(asset.url)
+        if not is_allowed_supabase_storage_url(asset_url):
+            raise HTTPException(status_code=400, detail="B-roll assets must use signed Supabase Storage URLs.")
+        if any(not keyword.strip() or len(keyword.strip()) > 40 for keyword in asset.keywords):
+            raise HTTPException(status_code=422, detail="Each B-roll keyword must contain 1 to 40 characters.")
     try:
         source_type = ensure_supported_ingestion_source(url)
     except SourceAccessRequired as exc:
