@@ -95,6 +95,13 @@ class JobStore:
             return None
         return Path(row["artifact_path"])
 
+    def counts_by_state(self) -> dict[str, int]:
+        with closing(self._connect()) as conn, conn:
+            rows = conn.execute(
+                "SELECT state, COUNT(*) AS n FROM jobs GROUP BY state"
+            ).fetchall()
+        return {str(row["state"]): int(row["n"]) for row in rows}
+
     def count_active(self) -> int:
         with closing(self._connect()) as conn, conn:
             row = conn.execute(
