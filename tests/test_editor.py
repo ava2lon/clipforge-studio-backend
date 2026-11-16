@@ -114,3 +114,23 @@ def test_edit_render_trims_shifts_captions_and_marks_complete(tmp_path, monkeypa
         {"start": 1.0, "end": 1.5, "text": "word"},
     ]
     assert captured["focus"] == [{"time": 0.0, "x": 0.5, "y": 0.4}]
+
+
+def test_interrupted_editor_render_is_requeued_when_source_survives(tmp_path, monkeypatch):
+    job_id, job_dir = _fixture_job(tmp_path, monkeypatch)
+    state = jobs.create_clip_edit(job_id, "clip-01.mp4", tmp_path, _settings())
+    state["state"] = "RUNNING"
+    jobs._write_edit_state(jobs._edit_state_path(job_dir, state["edit_id"]), state)
+    submitted = []
+
+    class FakeExecutor:
+        def submit(self, fn, *args):
+            submitted.append((fn.__name__, args))
+
+    monkeypatch.setattr(jobs, "_WORKDIR", tmp_path)
+    monkeypatch.setattr(jobs, "_EXECUTOR", FakeExecutor())
+    jobs._resume_interrupted_edits()
+
+    recovered = jobs.get_clip_edit(job_id, state["edit_id"], tmp_path)
+    assert recovered["state"] == "QUEUED"
+    assert submitted == [("_run_clip_edit", (job_id, state["edit_id"], job_dir))]
