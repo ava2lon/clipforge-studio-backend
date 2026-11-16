@@ -7,6 +7,7 @@ import {
   useCurrentFrame,
   useVideoConfig,
   interpolate,
+  Sequence,
 } from "remotion";
 
 type Caption = { start: number; end: number; text: string };
@@ -25,6 +26,7 @@ type ClipForgeProps = {
   captionPosition: CaptionPosition;
   transition: "none" | "fade";
   transitionDurationSeconds: number;
+  brollOverlays: BrollOverlay[];
 };
 
 const clamp = (value: number, min: number, max: number) =>
@@ -168,7 +170,7 @@ const BrollOverlayLayer: React.FC<{ overlays: BrollOverlay[] }> = ({ overlays })
 
 const ClipForgeComposition: React.FC<ClipForgeProps> = ({
   captions, focusKeyframes, sourceWidth, sourceHeight, captionStyle, captionPosition,
-  transition, transitionDurationSeconds,
+  transition, transitionDurationSeconds, brollOverlays,
 }) => {
   const frame = useCurrentFrame();
   const { fps, width, height, durationInFrames } = useVideoConfig();
