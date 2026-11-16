@@ -304,3 +304,36 @@ def test_clip_edit_endpoint_requires_api_key(monkeypatch):
         json={"trim_start": 0, "trim_end": 5, "captions": []},
     )
     assert response.status_code == 401
+
+
+def test_metrics_endpoint_requires_api_key(monkeypatch):
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    response = client.get("/metrics")
+    assert response.status_code == 401
+
+
+def test_metrics_endpoint_returns_aggregate_runtime_data(monkeypatch):
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    monkeypatch.setattr("api.runtime_metrics", lambda: {
+        "jobs_by_state": {"COMPLETED": 4, "FAILED": 1},
+        "queue": {
+            "active_jobs": 1,
+            "active_edit_renders": 2,
+            "max_active_jobs": 3,
+            "worker_count": 1,
+        },
+        "storage": {
+            "total_bytes": 1000,
+            "used_bytes": 400,
+            "free_bytes": 600,
+            "retention_seconds": 604800,
+            "cleanup_interval_seconds": 3600,
+        },
+        "timestamp": 1.0,
+    })
+    response = client.get("/metrics", headers={"X-API-Key": "test-secret"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["jobs_by_state"]["COMPLETED"] == 4
+    assert body["queue"]["active_edit_renders"] == 2
+    assert body["storage"]["free_bytes"] == 600
