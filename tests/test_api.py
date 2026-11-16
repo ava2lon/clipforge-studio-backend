@@ -58,3 +58,22 @@ def test_clip_submission_rejects_unsafe_supabase_urls(monkeypatch):
     for media in unsafe_urls:
         response = client.post("/clips", headers=headers, json={"media": media})
         assert response.status_code in (400, 422), (media, response.text)
+
+
+
+def test_status_rejects_malformed_job_id(monkeypatch):
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    response = client.get("/status/../../etc/passwd", headers={"X-API-Key": "test-secret"})
+    assert response.status_code in (400, 404)
+
+
+def test_status_rejects_non_hex_job_id(monkeypatch):
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    response = client.get("/status/" + "g" * 32, headers={"X-API-Key": "test-secret"})
+    assert response.status_code == 400
+
+
+def test_download_rejects_non_hex_job_id(monkeypatch):
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    response = client.get("/download/" + "g" * 32, headers={"X-API-Key": "test-secret"})
+    assert response.status_code == 400
