@@ -122,7 +122,7 @@ def test_clip_submission_accepts_caption_presets(monkeypatch):
         },
     )
     assert response.status_code == 202
-    assert captured["args"][-7:] == ("minimal", "top", True, "none", 0.5, None, [])
+    assert captured["args"][-8:] == ("minimal", "top", True, "none", 0.5, None, True, [])
 
 
 def test_clip_submission_rejects_unknown_caption_preset(monkeypatch):
@@ -153,7 +153,7 @@ def test_clip_submission_can_disable_audio_cleanup(monkeypatch):
     )
     assert response.status_code == 202
     assert captured["args"][4] is False
-    assert captured["args"][-4:] == ("none", 0.5, None, [])
+    assert captured["args"][-5:] == ("none", 0.5, None, True, [])
 
 
 def test_clip_submission_accepts_signed_project_broll_assets(monkeypatch):
