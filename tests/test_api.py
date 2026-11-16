@@ -35,7 +35,7 @@ def test_clip_submission_requires_api_key(monkeypatch):
 
 def test_clip_submission_accepts_public_social_source_without_oauth(monkeypatch):
     monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
-    monkeypatch.setattr("api.create_job", lambda url, workdir: "b" * 32)
+    monkeypatch.setattr("api.create_job", lambda url, workdir, *args: "b" * 32)
     response = client.post(
         "/clips",
         headers={"X-API-Key": "test-secret"},
@@ -83,7 +83,7 @@ def test_download_rejects_non_hex_job_id(monkeypatch):
 
 def test_clip_submission_accepts_direct_https_mp4_url(monkeypatch):
     monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
-    monkeypatch.setattr("api.create_job", lambda url, workdir: "a" * 32)
+    monkeypatch.setattr("api.create_job", lambda url, workdir, *args: "a" * 32)
     response = client.post(
         "/clips",
         headers={"X-API-Key": "test-secret"},
