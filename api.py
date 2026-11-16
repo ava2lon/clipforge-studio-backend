@@ -13,7 +13,8 @@ from pydantic import BaseModel, Field, HttpUrl
 
 from renderer.capabilities import collect_capabilities
 from renderer.jobs import create_job, get_job, job_artifact
-from renderer.ingestion import SourceAccessRequired, ensure_supported_ingestion_source\nfrom renderer.security import is_allowed_supabase_storage_url
+from renderer.ingestion import SourceAccessRequired, ensure_supported_ingestion_source
+from renderer.security import is_allowed_supabase_storage_url
 
 APP_VERSION = "0.2.0"
 _JOB_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
@@ -22,7 +23,12 @@ WORKDIR.mkdir(parents=True, exist_ok=True)
 app = FastAPI(title="ClipForge Studio Backend", version=APP_VERSION)
 
 
-class BrollAssetRequest(BaseModel):\n    url: HttpUrl\n    keywords: list[str] = Field(default_factory=list, min_length=1, max_length=8)\n\n\nclass ClipRequest(BaseModel):
+class BrollAssetRequest(BaseModel):
+    url: HttpUrl
+    keywords: list[str] = Field(default_factory=list, min_length=1, max_length=8)
+
+
+class ClipRequest(BaseModel):
     media: HttpUrl = Field(..., description="HTTPS Supabase Storage signed URL or public direct MP4 URL")
     clip_prompt: str | None = Field(default=None, max_length=500, description="Optional natural-language topic or moment to find in the source video")
     aspect_ratio: Literal["9:16", "1:1", "16:9"] = Field(default="9:16", description="Rendered output aspect ratio")
@@ -30,7 +36,9 @@ class BrollAssetRequest(BaseModel):\n    url: HttpUrl\n    keywords: list[str] =
     caption_position: Literal["top", "center", "bottom"] = Field(default="bottom", description="Caption vertical position")
     audio_cleanup: bool = Field(default=True, description="Apply FFmpeg voice cleanup and loudness normalization")
     transition: Literal["none", "fade"] = Field(default="none", description="Fade video and audio at clip boundaries")
-    transition_duration: float = Field(default=0.5, ge=0.0, le=1.5, description="Fade duration in seconds; maximum 1.5")\n    broll_assets: list[BrollAssetRequest] = Field(default_factory=list, max_length=3)
+    transition_duration: float = Field(default=0.5, ge=0.0, le=1.5, description="Fade duration in seconds; maximum 1.5")
+    broll_assets: list[BrollAssetRequest] = Field(default_factory=list, max_length=3)
+    broll_assets: list[BrollAssetRequest] = Field(default_factory=list, max_length=3)
 
 
 class ProbeRequest(BaseModel):
@@ -99,7 +107,8 @@ def submit_clip(request: ClipRequest, x_api_key: str | None = Header(default=Non
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
-        job_id = create_job(url, WORKDIR, request.clip_prompt, request.aspect_ratio, request.caption_style, request.caption_position, request.audio_cleanup, request.transition, request.transition_duration,\n                              [{"url": str(asset.url), "keywords": [keyword.strip() for keyword in asset.keywords]} for asset in request.broll_assets])
+        job_id = create_job(url, WORKDIR, request.clip_prompt, request.aspect_ratio, request.caption_style, request.caption_position, request.audio_cleanup, request.transition, request.transition_duration,
+                              [{"url": str(asset.url), "keywords": [keyword.strip() for keyword in asset.keywords]} for asset in request.broll_assets])
     except RuntimeError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     return {"job_id": job_id, "source_type": source_type, "status_url": f"/status/{job_id}", "download_url": f"/download/{job_id}"}
