@@ -122,7 +122,7 @@ def test_clip_submission_accepts_caption_presets(monkeypatch):
         },
     )
     assert response.status_code == 202
-    assert captured["args"][-2:] == ("minimal", "top")
+    assert captured["args"][-3:] == ("minimal", "top", True)
 
 
 def test_clip_submission_rejects_unknown_caption_preset(monkeypatch):
@@ -136,3 +136,20 @@ def test_clip_submission_rejects_unknown_caption_preset(monkeypatch):
         },
     )
     assert response.status_code == 422
+
+
+
+def test_clip_submission_can_disable_audio_cleanup(monkeypatch):
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    captured = {}
+    def fake_create_job(url, workdir, *args):
+        captured["args"] = args
+        return "d" * 32
+    monkeypatch.setattr("api.create_job", fake_create_job)
+    response = client.post(
+        "/clips",
+        headers={"X-API-Key": "test-secret"},
+        json={"media": "https://cdn.example.net/video.mp4", "audio_cleanup": False},
+    )
+    assert response.status_code == 202
+    assert captured["args"][-1] is False
