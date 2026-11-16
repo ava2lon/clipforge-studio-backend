@@ -13,7 +13,10 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, HttpUrl
 
 from renderer.capabilities import collect_capabilities
-from renderer.jobs import create_job, get_job, job_artifact
+from renderer.jobs import (
+    clip_edit_artifact, create_clip_edit, create_job, get_clip_edit,
+    get_job, job_artifact, render_clip_edit,
+)
 from renderer.ingestion import SourceAccessRequired, ensure_supported_ingestion_source
 from renderer.security import is_allowed_supabase_storage_url
 
@@ -39,6 +42,24 @@ class ClipRequest(BaseModel):
     transition: Literal["none", "fade"] = Field(default="none", description="Fade video and audio at clip boundaries")
     transition_duration: float = Field(default=0.5, ge=0.0, le=1.5, description="Fade duration in seconds; maximum 1.5")
     broll_assets: list[BrollAssetRequest] = Field(default_factory=list, max_length=3)
+
+
+class CaptionEdit(BaseModel):
+    start: float = Field(..., ge=0)
+    end: float = Field(..., gt=0)
+    text: str = Field(..., min_length=1, max_length=100)
+
+
+class ClipEditRequest(BaseModel):
+    trim_start: float = Field(..., ge=0)
+    trim_end: float = Field(..., gt=0)
+    captions: list[CaptionEdit] = Field(default_factory=list, max_length=300)
+    aspect_ratio: Literal["9:16", "1:1", "16:9"] = "9:16"
+    caption_style: Literal["karaoke", "bold", "minimal"] = "karaoke"
+    caption_position: Literal["top", "center", "bottom"] = "bottom"
+    transition: Literal["none", "fade"] = "none"
+    transition_duration: float = Field(default=0.5, ge=0.0, le=1.5)
+    brand_template: Literal["classic", "creator", "clean", "neon"] = "classic"
 
 
 class ProbeRequest(BaseModel):
@@ -172,6 +193,66 @@ def clip_file(job_id: str, filename: str, x_api_key: str | None = Header(default
     if not _inside_workdir(clip_path) or not clip_path.is_file():
         raise HTTPException(status_code=404, detail="Clip asset not found")
     return FileResponse(clip_path, media_type="video/mp4", filename=filename,
+                        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
+
+
+@app.post("/edit/{job_id}/{filename}", status_code=201)
+def save_clip_edit(job_id: str, filename: str, request: ClipEditRequest,
+                   x_api_key: str | None = Header(default=None)) -> dict[str, Any]:
+    _authorize(x_api_key)
+    _validate_job_id(job_id)
+    settings = request.model_dump()
+    try:
+        state = create_clip_edit(job_id, filename, WORKDIR, settings)
+        return {key: value for key, value in state.items() if key != "settings"} | {"settings": settings}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+
+
+@app.post("/edit/{job_id}/{edit_id}/render", status_code=202)
+def start_clip_edit_render(job_id: str, edit_id: str,
+                           x_api_key: str | None = Header(default=None)) -> dict[str, Any]:
+    _authorize(x_api_key)
+    _validate_job_id(job_id)
+    if not re.fullmatch(r"[a-f0-9]{32}", edit_id):
+        raise HTTPException(status_code=400, detail="Invalid edit ID")
+    try:
+        state = render_clip_edit(job_id, edit_id, WORKDIR)
+        return {key: value for key, value in state.items() if key != "settings"}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+
+
+@app.get("/edit/{job_id}/{edit_id}")
+def clip_edit_status(job_id: str, edit_id: str,
+                     x_api_key: str | None = Header(default=None)) -> dict[str, Any]:
+    _authorize(x_api_key)
+    _validate_job_id(job_id)
+    if not re.fullmatch(r"[a-f0-9]{32}", edit_id):
+        raise HTTPException(status_code=400, detail="Invalid edit ID")
+    state = get_clip_edit(job_id, edit_id, WORKDIR)
+    if not state:
+        raise HTTPException(status_code=404, detail="Saved edit not found")
+    return {key: value for key, value in state.items() if key != "settings"}
+
+
+@app.get("/edit/{job_id}/{edit_id}/download")
+def download_clip_edit(job_id: str, edit_id: str,
+                       x_api_key: str | None = Header(default=None)):
+    _authorize(x_api_key)
+    _validate_job_id(job_id)
+    if not re.fullmatch(r"[a-f0-9]{32}", edit_id):
+        raise HTTPException(status_code=400, detail="Invalid edit ID")
+    artifact = clip_edit_artifact(job_id, edit_id, WORKDIR)
+    if not artifact:
+        raise HTTPException(status_code=409, detail="Edited export is not ready")
+    return FileResponse(artifact, media_type="video/mp4", filename=f"clipforge-{job_id}-{edit_id[:8]}.mp4",
                         headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
 
 
