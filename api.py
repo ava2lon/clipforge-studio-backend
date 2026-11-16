@@ -28,7 +28,7 @@ class ClipRequest(BaseModel):
     aspect_ratio: Literal["9:16", "1:1", "16:9"] = Field(default="9:16", description="Rendered output aspect ratio")
     caption_style: Literal["karaoke", "bold", "minimal"] = Field(default="karaoke", description="Caption visual style")
     caption_position: Literal["top", "center", "bottom"] = Field(default="bottom", description="Caption vertical position")
-    audio_cleanup: bool = Field(default=True, description="Apply FFmpeg voice cleanup and loudness normalization")
+    audio_cleanup: bool = Field(default=True, description="Apply FFmpeg voice cleanup and loudness normalization")\n    transition: Literal["none", "fade"] = Field(default="none", description="Fade video and audio at clip boundaries")\n    transition_duration: float = Field(default=0.5, ge=0.0, le=1.5, description="Fade duration in seconds; maximum 1.5")
 
 
 class ProbeRequest(BaseModel):
@@ -97,7 +97,7 @@ def submit_clip(request: ClipRequest, x_api_key: str | None = Header(default=Non
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
-        job_id = create_job(url, WORKDIR, request.clip_prompt, request.aspect_ratio, request.caption_style, request.caption_position, request.audio_cleanup)
+        job_id = create_job(url, WORKDIR, request.clip_prompt, request.aspect_ratio, request.caption_style, request.caption_position, request.audio_cleanup, request.transition, request.transition_duration)
     except RuntimeError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     return {"job_id": job_id, "source_type": source_type, "status_url": f"/status/{job_id}", "download_url": f"/download/{job_id}"}
