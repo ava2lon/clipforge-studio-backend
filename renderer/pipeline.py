@@ -203,7 +203,15 @@ def _active_ratio(start: float, end: float, ranges: list[tuple[float, float]]) -
     return min(1.0, active / (end - start))
 
 
-def _validate_transition_options(transition: str, duration: float) -> float:\n    if transition not in {"none", "fade"}:\n        raise PipelineError("Transition must be none or fade")\n    if not 0.0 <= duration <= 1.5:\n        raise PipelineError("Transition duration must be between 0 and 1.5 seconds")\n    return 0.0 if transition == "none" else float(duration)\n\n\ndef _aspect_dimensions(aspect_ratio: str) -> tuple[int, int]:
+def _validate_transition_options(transition: str, duration: float) -> float:
+    if transition not in {"none", "fade"}:
+        raise PipelineError("Transition must be none or fade")
+    if not 0.0 <= duration <= 1.5:
+        raise PipelineError("Transition duration must be between 0 and 1.5 seconds")
+    return 0.0 if transition == "none" else float(duration)
+
+
+def _aspect_dimensions(aspect_ratio: str) -> tuple[int, int]:
     dimensions = {"9:16": (1080, 1920), "1:1": (1080, 1080), "16:9": (1920, 1080)}
     try:
         return dimensions[aspect_ratio]
@@ -280,7 +288,8 @@ def _render_with_remotion(source: Path, output: Path, duration: float,
                           captions: list[dict[str, Any]], aspect_ratio: str = "9:16",
                           focus_keyframes: list[dict[str, float]] | None = None,
                           source_width: int = 0, source_height: int = 0,
-                          caption_style: str = "karaoke", caption_position: str = "bottom",\n                          transition: str = "none", transition_duration: float = 0.5) -> Path:
+                          caption_style: str = "karaoke", caption_position: str = "bottom",
+                          transition: str = "none", transition_duration: float = 0.5) -> Path:
     # Remotion's public/clip.mp4, props file and output path are shared by all workers.
     with _REMOTION_LOCK:
         project = Path(__file__).resolve().parents[1] / "remotion"
@@ -305,6 +314,8 @@ def _render_with_remotion(source: Path, output: Path, duration: float,
                 "sourceHeight": source_height,
                 "captionStyle": caption_style,
                 "captionPosition": caption_position,
+                "transition": transition,
+                "transitionDurationSeconds": transition_duration,
             }),
                                   encoding="utf-8")
             rendered.unlink(missing_ok=True)
@@ -427,8 +438,10 @@ def analyze_and_extract(source: Path, output_dir: Path, media: dict[str, Any],
                         progress: Callable[[int, str], None] = lambda *_: None,
                         clip_prompt: str | None = None, aspect_ratio: str = "9:16",
                         caption_style: str = "karaoke", caption_position: str = "bottom",
-                        audio_cleanup: bool = True) -> list[dict[str, Any]]:
+                        audio_cleanup: bool = True, transition: str = "none",
+                        transition_duration: float = 0.5) -> list[dict[str, Any]]:
     _aspect_dimensions(aspect_ratio)
+    transition_duration = _validate_transition_options(transition, transition_duration)
     duration = float(media.get("format", {}).get("duration", 0))
     if duration <= 0:
         raise PipelineError("Media duration is missing or invalid")
@@ -470,7 +483,7 @@ def analyze_and_extract(source: Path, output_dir: Path, media: dict[str, Any],
             path = _render_with_remotion(render_source, output_dir / name, candidate["duration"],
                                          candidate.get("captions", []), aspect_ratio, focus_keyframes,
                                          int(video_stream.get("width", 0)), int(video_stream.get("height", 0)),
-                                         caption_style, caption_position)
+                                         caption_style, caption_position, transition, transition_duration)
         finally:
             raw_path.unlink(missing_ok=True)
             cleaned_path.unlink(missing_ok=True)
@@ -478,6 +491,8 @@ def analyze_and_extract(source: Path, output_dir: Path, media: dict[str, Any],
                         "scene_detection": "PySceneDetect",
                         "reframing": "face-aware" if focus_keyframes else "center-fallback",
                         "audio_cleanup": audio_cleanup_status,
+                        "transition": transition,
+                        "transition_duration_seconds": transition_duration,
                         "silence_analysis": "Auto-Editor" if active_ranges else "no_ranges_or_unavailable"})
         progress(72 + int(18 * index / len(candidates)), f"Rendering clip {index}/{len(candidates)} with FFmpeg")
     return results
