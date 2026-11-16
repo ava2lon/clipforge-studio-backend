@@ -118,13 +118,15 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
             partial = job_dir / "source.media.part"
             _download(url, partial)
             os.replace(partial, source)
-        if clip_prompt is None:
+        if clip_prompt is None or aspect_ratio is None:
             options_path = job_dir / "clipforge-options.json"
             if options_path.is_file():
                 try:
                     options = json.loads(options_path.read_text(encoding="utf-8"))
-                    clip_prompt = str(options.get("clip_prompt") or "") or None
-                    aspect_ratio = str(options.get("aspect_ratio") or "9:16")
+                    if clip_prompt is None:
+                        clip_prompt = str(options.get("clip_prompt") or "") or None
+                    if aspect_ratio is None:
+                        aspect_ratio = str(options.get("aspect_ratio") or "9:16")
                 except (OSError, ValueError, TypeError):
                     clip_prompt = None
         aspect_ratio = aspect_ratio or "9:16"
