@@ -16,6 +16,7 @@ from typing import Any
 from renderer.job_store import JobStore
 from renderer.pipeline import PipelineError, analyze_and_extract, probe_media
 from renderer.security import is_allowed_supabase_storage_url
+from renderer.ingestion import download_direct_mp4, ensure_supported_ingestion_source
 
 _MAX_WORKERS = max(1, int(os.getenv("CLIPFORGE_MAX_WORKERS", "1")))
 _MAX_ACTIVE_JOBS = _MAX_WORKERS * 3
@@ -71,7 +72,9 @@ class _SupabaseRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 def _download(url: str, target: Path) -> None:
     if not is_allowed_supabase_storage_url(url):
-        raise PipelineError("Source URL is not an allowed Supabase Storage signed URL")
+        ensure_supported_ingestion_source(url)
+        download_direct_mp4(url, target, _MAX_DOWNLOAD_BYTES)
+        return
     request = urllib.request.Request(url, headers={"User-Agent": "ClipForge-Studio/0.2"})
     total = 0
     opener = urllib.request.build_opener(_SupabaseRedirectHandler())
