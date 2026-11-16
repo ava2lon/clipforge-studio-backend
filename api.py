@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, HttpUrl
 from renderer.capabilities import collect_capabilities
 from renderer.jobs import (
     clip_edit_artifact, create_clip_edit, create_job, get_clip_edit, list_clip_edits,
-    get_job, job_artifact, render_clip_edit, runtime_metrics,
+    get_job, job_artifact, render_clip_edit, retry_job, runtime_metrics,
 )
 from renderer.ingestion import SourceAccessRequired, ensure_supported_ingestion_source
 from renderer.security import is_allowed_supabase_storage_url
@@ -148,6 +148,20 @@ def submit_clip(request: ClipRequest, x_api_key: str | None = Header(default=Non
     except RuntimeError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     return {"job_id": job_id, "source_type": source_type, "status_url": f"/status/{job_id}", "download_url": f"/download/{job_id}"}
+
+
+@app.post("/retry/{job_id}", status_code=202)
+def retry_failed_job(job_id: str, x_api_key: str | None = Header(default=None)) -> dict[str, Any]:
+    _authorize(x_api_key)
+    _validate_job_id(job_id)
+    try:
+        return retry_job(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Job not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
 
 
 @app.get("/status/{job_id}")
