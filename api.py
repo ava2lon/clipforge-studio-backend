@@ -28,7 +28,9 @@ class ClipRequest(BaseModel):
     aspect_ratio: Literal["9:16", "1:1", "16:9"] = Field(default="9:16", description="Rendered output aspect ratio")
     caption_style: Literal["karaoke", "bold", "minimal"] = Field(default="karaoke", description="Caption visual style")
     caption_position: Literal["top", "center", "bottom"] = Field(default="bottom", description="Caption vertical position")
-    audio_cleanup: bool = Field(default=True, description="Apply FFmpeg voice cleanup and loudness normalization")\n    transition: Literal["none", "fade"] = Field(default="none", description="Fade video and audio at clip boundaries")\n    transition_duration: float = Field(default=0.5, ge=0.0, le=1.5, description="Fade duration in seconds; maximum 1.5")
+    audio_cleanup: bool = Field(default=True, description="Apply FFmpeg voice cleanup and loudness normalization")
+    transition: Literal["none", "fade"] = Field(default="none", description="Fade video and audio at clip boundaries")
+    transition_duration: float = Field(default=0.5, ge=0.0, le=1.5, description="Fade duration in seconds; maximum 1.5")
 
 
 class ProbeRequest(BaseModel):
