@@ -121,7 +121,7 @@ const CaptionOverlay: React.FC<{
   const palette = style === "karaoke"
     ? { active: activeAccent, inactive: "#FFFFFF", background: "rgba(0,0,0,0.58)" }
     : style === "bold"
-      ? { active: "#FFFFFF", inactive: "#FFFFFF", background: "rgba(0,0,0,0.68)" }
+      ? { active: activeAccent, inactive: "#FFFFFF", background: "rgba(0,0,0,0.68)" }
       : { active: activeAccent, inactive: "#FFFFFF", background: "transparent" };
 
   return (
@@ -187,11 +187,20 @@ const ClipForgeComposition: React.FC<ClipForgeProps> = ({
   const { fps, width, height, durationInFrames } = useVideoConfig();
   const focus = focusAt(focusKeyframes, frame / fps);
   const objectPosition = cropPosition(focus, sourceWidth, sourceHeight, width, height);
-  const fadeFrames = transition === "fade" ? Math.max(1, Math.round(transitionDurationSeconds * fps)) : 0;
-  const fadeOutStart = Math.max(fadeFrames + 1, durationInFrames - fadeFrames);
-  const fadeOpacity = (currentFrame: number) => fadeFrames > 0
-    ? interpolate(currentFrame, [0, fadeFrames, fadeOutStart, durationInFrames - 1], [0, 1, 1, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })
-    : 1;
+  const fadeFrames = transition === "fade"
+    ? Math.min(Math.max(1, Math.round(transitionDurationSeconds * fps)), Math.floor(Math.max(0, durationInFrames - 1) / 2))
+    : 0;
+  const fadeOutStart = Math.max(0, durationInFrames - 1 - fadeFrames);
+  const fadeOpacity = (currentFrame: number) => {
+    if (fadeFrames <= 0) return 1;
+    const fadeIn = interpolate(currentFrame, [0, fadeFrames], [0, 1], {
+      extrapolateLeft: "clamp", extrapolateRight: "clamp",
+    });
+    const fadeOut = interpolate(currentFrame, [fadeOutStart, Math.max(fadeOutStart + 1, durationInFrames - 1)], [1, 0], {
+      extrapolateLeft: "clamp", extrapolateRight: "clamp",
+    });
+    return Math.min(fadeIn, fadeOut);
+  };
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#080b12", opacity: fadeOpacity(frame) }}>
