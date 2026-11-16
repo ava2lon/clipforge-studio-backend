@@ -162,4 +162,16 @@ def test_clean_audio_removes_partial_output_on_ffmpeg_failure(monkeypatch, tmp_p
         _clean_audio(source, output)
     assert not output.exists()
     assert not (tmp_path / "clean.part.mp4").exists()
-\n\ndef test_transition_options_validate_and_default_to_none():\n    import pytest\n    from renderer.pipeline import PipelineError\n\n    from renderer.pipeline import _validate_transition_options\n    assert _validate_transition_options("none", 0.5) == 0.0\n    assert _validate_transition_options("fade", 0.75) == 0.75\n    with pytest.raises(PipelineError, match="Transition must be"):\n        _validate_transition_options("slide", 0.5)\n    with pytest.raises(PipelineError, match="between 0 and 1.5"):\n        _validate_transition_options("fade", 2.0)\n
+
+
+def test_transition_options_validate_and_default_to_none():
+    import pytest
+    from renderer.pipeline import PipelineError
+
+    from renderer.pipeline import _validate_transition_options
+    assert _validate_transition_options("none", 0.5) == 0.0
+    assert _validate_transition_options("fade", 0.75) == 0.75
+    with pytest.raises(PipelineError, match="Transition must be"):
+        _validate_transition_options("slide", 0.5)
+    with pytest.raises(PipelineError, match="between 0 and 1.5"):
+        _validate_transition_options("fade", 2.0)
