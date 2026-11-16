@@ -289,7 +289,7 @@ def _render_with_remotion(source: Path, output: Path, duration: float,
                           focus_keyframes: list[dict[str, float]] | None = None,
                           source_width: int = 0, source_height: int = 0,
                           caption_style: str = "karaoke", caption_position: str = "bottom",
-                          transition: str = "none", transition_duration: float = 0.5) -> Path:
+                          transition: str = "none", transition_duration: float = 0.5,\n                          broll_placements: list[dict[str, Any]] | None = None) -> Path:
     # Remotion's public/clip.mp4, props file and output path are shared by all workers.
     with _REMOTION_LOCK:
         project = Path(__file__).resolve().parents[1] / "remotion"
@@ -333,6 +333,50 @@ def _render_with_remotion(source: Path, output: Path, duration: float,
             public_media.unlink(missing_ok=True)
             props_path.unlink(missing_ok=True)
             rendered.unlink(missing_ok=True)
+
+
+def _broll_placements(captions: list[dict[str, Any]], duration: float,
+                      assets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Place user-supplied B-roll only when its explicit keywords match caption text."""
+    placements: list[dict[str, Any]] = []
+    occupied: list[tuple[float, float]] = []
+    normalized_captions = [
+        (item, re.findall(r"[a-z0-9]+", str(item.get("text", "")).lower()))
+        for item in captions
+    ]
+    for asset_index, asset in enumerate(assets):
+        keywords = {
+            token
+            for phrase in asset.get("keywords", [])
+            for token in re.findall(r"[a-z0-9]+", str(phrase).lower())
+            if len(token) >= 2
+        }
+        if not keywords:
+            continue
+        match = None
+        for caption, tokens in normalized_captions:
+            if not keywords.intersection(tokens):
+                continue
+            start = max(0.0, float(caption.get("start", 0.0)) - 0.35)
+            overlay_duration = min(4.0, max(0.0, duration - start))
+            end = start + overlay_duration
+            if overlay_duration < 0.75:
+                continue
+            if any(start < used_end and end > used_start for used_start, used_end in occupied):
+                continue
+            match = (start, overlay_duration)
+            occupied.append((start, end))
+            break
+        if match:
+            placements.append({
+                "asset_index": asset_index,
+                "path": str(asset["path"]),
+                "start": round(match[0], 3),
+                "duration": round(match[1], 3),
+                "keywords": list(asset.get("keywords", [])),
+            })
+    return placements
+
 
 def _prompt_tokens(prompt: str | None) -> set[str]:
     if not prompt:
@@ -480,10 +524,10 @@ def analyze_and_extract(source: Path, output_dir: Path, media: dict[str, Any],
                     # Preserve the original clip if optional cleanup is unavailable or fails.
                     cleaned_path.unlink(missing_ok=True)
                     audio_cleanup_status = "fallback_original"
-            path = _render_with_remotion(render_source, output_dir / name, candidate["duration"],
+            broll_placements = _broll_placements(candidate.get("captions", []), candidate["duration"], broll_assets)\n            path = _render_with_remotion(render_source, output_dir / name, candidate["duration"],
                                          candidate.get("captions", []), aspect_ratio, focus_keyframes,
                                          int(video_stream.get("width", 0)), int(video_stream.get("height", 0)),
-                                         caption_style, caption_position, transition, transition_duration)
+                                         caption_style, caption_position, transition, transition_duration,\n                                         broll_placements)
         finally:
             raw_path.unlink(missing_ok=True)
             cleaned_path.unlink(missing_ok=True)
@@ -492,7 +536,7 @@ def analyze_and_extract(source: Path, output_dir: Path, media: dict[str, Any],
                         "reframing": "face-aware" if focus_keyframes else "center-fallback",
                         "audio_cleanup": audio_cleanup_status,
                         "transition": transition,
-                        "transition_duration_seconds": transition_duration,
+                        "transition_duration_seconds": transition_duration,\n                        "broll_placements": [{k: v for k, v in item.items() if k != "path"} for item in broll_placements],
                         "silence_analysis": "Auto-Editor" if active_ranges else "no_ranges_or_unavailable"})
         progress(72 + int(18 * index / len(candidates)), f"Rendering clip {index}/{len(candidates)} with FFmpeg")
     return results
