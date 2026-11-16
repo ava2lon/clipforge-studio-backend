@@ -2,7 +2,7 @@ import pytest
 
 from renderer import ingestion
 from renderer.ingestion import (
-    SourceAccessRequired,
+    download_social_video,
     _validated_https_target,
     classify_source_url,
     ensure_supported_ingestion_source,
@@ -58,9 +58,8 @@ def test_accepts_public_dns_resolution(monkeypatch):
     "https://www.facebook.com/reel/123",
     "https://www.instagram.com/reel/123",
 ])
-def test_social_links_require_authorized_provider_access(url):
-    with pytest.raises(SourceAccessRequired):
-        ensure_supported_ingestion_source(url)
+def test_social_links_are_accepted_without_account_authorization(url):
+    assert ensure_supported_ingestion_source(url) in {"youtube", "tiktok", "facebook", "instagram"}
 
 
 def test_direct_video_is_supported():
@@ -204,4 +203,44 @@ def test_direct_mp4_rejects_declared_oversize_before_streaming(monkeypatch, tmp_
     target = tmp_path / "source.part"
     with pytest.raises(Exception, match="maximum source size"):
         ingestion.download_direct_mp4("https://cdn.example/clip.mp4", target, 1024)
+    assert not target.exists()
+
+
+
+def test_yt_dlp_downloads_public_video_without_cookies(monkeypatch, tmp_path):
+    calls = {}
+
+    def fake_run(command, **kwargs):
+        calls["command"] = command
+        calls["kwargs"] = kwargs
+        output = tmp_path / "source.media.mp4"
+        output.write_bytes(b"\\x00\\x00\\x00\\x18ftypmp42video")
+        class Result:
+            returncode = 0
+        return Result()
+
+    monkeypatch.setattr(ingestion.subprocess, "run", fake_run)
+    target = tmp_path / "source.media.part"
+    download_social_video(
+        "https://youtube.com/shorts/_az0sT5IYaE?si=RGARmBuPzvmIVrz3",
+        target, 1024,
+    )
+    assert target.read_bytes().startswith(b"\\x00\\x00\\x00\\x18ftyp")
+    assert "--ignore-config" in calls["command"]
+    assert "--no-playlist" in calls["command"]
+    assert "--cookies" not in calls["command"]
+    assert calls["kwargs"]["stdin"] is ingestion.subprocess.DEVNULL
+
+
+def test_yt_dlp_rejects_oversized_or_invalid_output(monkeypatch, tmp_path):
+    def fake_run(command, **kwargs):
+        (tmp_path / "source.media.mp4").write_bytes(b"not-an-mp4-file")
+        class Result:
+            returncode = 0
+        return Result()
+
+    monkeypatch.setattr(ingestion.subprocess, "run", fake_run)
+    target = tmp_path / "source.media.part"
+    with pytest.raises(Exception, match="valid MP4"):
+        download_social_video("https://youtube.com/shorts/abc123", target, 1024)
     assert not target.exists()
