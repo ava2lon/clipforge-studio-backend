@@ -204,24 +204,24 @@ def _prompt_tokens(prompt: str | None) -> set[str]:
     stop = {"a", "an", "and", "are", "as", "at", "be", "best", "clip", "clips",
             "find", "for", "from", "in", "into", "is", "it", "me", "of", "on",
             "or", "please", "show", "that", "the", "this", "to", "video", "with"}
-    return {token.lower() for token in re.findall(r"[\\w']+", prompt)
+    return {token.lower() for token in re.findall(r"[\w']+", prompt)
             if len(token) > 2 and token.lower() not in stop}
 
 
 def _candidate_score(text: str, start: float, end: float, scenes: list[float],
                      active_ranges: list[tuple[float, float]], prompt_terms: set[str]):
-    tokens = [token.lower() for token in re.findall(r"[\\w']+", text)]
+    tokens = [token.lower() for token in re.findall(r"[\w']+", text)]
     density = len(tokens) / max(end - start, 1.0)
     speech = min(20.0, density / 3.0 * 20.0)
-    hook_patterns = (r"\\?", r"\\b(how|why|secret|mistake|never|stop|truth|surprising|shocking|imagine|watch|listen)\\b",
-                     r"\\b(you won'?t believe|this is what|the biggest|the most important)\\b")
+    hook_patterns = (r"\?", r"\b(how|why|secret|mistake|never|stop|truth|surprising|shocking|imagine|watch|listen)\b",
+                     r"\b(you won'?t believe|this is what|the biggest|the most important)\b")
     hook = min(20.0, sum(bool(re.search(x, text, re.I)) for x in hook_patterns) * 8.0)
-    weak_open = bool(re.match(r"^(and|but|so|because|then|they|he|she|it|this|that)\\b", " ".join(tokens[:8])))
+    weak_open = bool(re.match(r"^(and|but|so|because|then|they|he|she|it|this|that)\b", " ".join(tokens[:8])))
     context = max(0.0, (15.0 if len(tokens) >= 12 else 9.0) - (5.0 if weak_open else 0.0))
-    ending = 8.0 + (3.0 if re.search(r"[.!?][\\\"'”’)]*$", text.strip()) else 0.0)
-    if re.search(r"\\b(therefore|that'?s why|in conclusion|the point is|so remember)\\b", text, re.I):
+    ending = 8.0 + (3.0 if re.search(r"[.!?][\\"'”’)]*$", text.strip()) else 0.0)
+    if re.search(r"\b(therefore|that'?s why|in conclusion|the point is|so remember)\b", text, re.I):
         ending += 4.0
-    if re.search(r"\\b(and then|but anyway|to be continued)\\s*$", text, re.I):
+    if re.search(r"\b(and then|but anyway|to be continued)\s*$", text, re.I):
         ending -= 4.0
     ending = max(0.0, min(15.0, ending))
     scene = 10.0 if any(abs(point - start) <= 2.0 for point in scenes) else 0.0
@@ -249,7 +249,7 @@ def _rank_candidates(segments: list[dict[str, Any]], scenes: list[float],
     prompt_terms = _prompt_tokens(prompt)
     words = []
     for seg in segments:
-        tokens = re.findall(r"[\\w']+", str(seg.get("text", "")))
+        tokens = re.findall(r"[\w']+", str(seg.get("text", "")))
         if tokens and float(seg.get("end", 0)) > float(seg.get("start", 0)):
             words.append({**seg, "tokens": tokens})
     words.sort(key=lambda x: (float(x["start"]), float(x["end"])))
