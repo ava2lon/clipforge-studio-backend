@@ -44,10 +44,16 @@ def classify_source_url(value: str) -> str:
         return "facebook"
     if host == "instagram.com" or host.endswith(".instagram.com"):
         return "instagram"
+    if host.endswith(".supabase.co"):
+        return "invalid"
+    try:
+        _validate_direct_url_shape(value)
+    except PipelineError:
+        return "invalid"
     return "direct_http_video"
 
 
-def _validated_https_target(url: str) -> tuple[str, int, str, list[str]]:
+def _validate_direct_url_shape(url: str) -> tuple[object, str]:
     try:
         parsed = urlsplit(url)
         host = parsed.hostname or ""
@@ -61,11 +67,20 @@ def _validated_https_target(url: str) -> tuple[str, int, str, list[str]]:
     if parsed.username is not None or parsed.password is not None or parsed.fragment:
         raise PipelineError("Credentials and URL fragments are not allowed")
     try:
-        host = host.encode("idna").decode("ascii").lower().rstrip(".")
         ipaddress.ip_address(host)
-        raise PipelineError("IP-literal source URLs are not allowed")
     except ValueError:
         pass
+    else:
+        raise PipelineError("IP-literal source URLs are not allowed")
+    return parsed, host
+
+
+def _validated_https_target(url: str) -> tuple[str, int, str, list[str]]:
+    parsed, host = _validate_direct_url_shape(url)
+    try:
+        host = host.encode("idna").decode("ascii").lower().rstrip(".")
+    except UnicodeError as exc:
+        raise PipelineError("Invalid source hostname") from exc
     try:
         records = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
     except socket.gaierror as exc:
