@@ -74,3 +74,40 @@ jobs:
           if invalid_storage:
               raise SystemExit("Invalid storage diagnostics: " + ", ".join(invalid_storage))
           PY
+
+      - name: Verify authenticated runtime metrics
+        shell: bash
+        env:
+          STUDIO_API_KEY: ${{ secrets.AVA2LON_STUDIO_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${STUDIO_API_KEY}" ]; then
+            echo "::warning::AVA2LON_STUDIO_API_KEY is not available to this workflow; runtime metrics smoke check skipped."
+            exit 0
+          fi
+          status="$(curl --silent --show-error --output /tmp/metrics.json --write-out '%{http_code}' --max-time 30 \
+            -H "X-API-Key: ${STUDIO_API_KEY}" "https://ava2lon-studio.hf.space/metrics")"
+          if [ "${status}" != "200" ]; then
+            echo "Metrics endpoint returned HTTP ${status}."
+            cat /tmp/metrics.json
+            exit 1
+          fi
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path("/tmp/metrics.json").read_text())
+          assert isinstance(data.get("jobs_by_state"), dict)
+          queue = data.get("queue", {})
+          storage = data.get("storage", {})
+          assert isinstance(queue.get("active_jobs"), int)
+          assert isinstance(queue.get("active_edit_renders"), int)
+          assert isinstance(queue.get("max_active_jobs"), int)
+          assert isinstance(storage.get("free_bytes"), int)
+          assert isinstance(storage.get("retention_seconds"), int)
+          print(json.dumps({
+              "jobs_by_state": data["jobs_by_state"],
+              "queue": queue,
+              "free_storage_bytes": storage["free_bytes"],
+          }, indent=2))
+          PY
