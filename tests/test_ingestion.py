@@ -244,3 +244,41 @@ def test_yt_dlp_rejects_oversized_or_invalid_output(monkeypatch, tmp_path):
     with pytest.raises(Exception, match="valid MP4"):
         download_social_video("https://youtube.com/shorts/abc123", target, 1024)
     assert not target.exists()
+
+
+
+def test_social_extraction_maps_platform_verification_without_leaking_diagnostics(monkeypatch, tmp_path):
+    def fake_run(_command, **_kwargs):
+        class Result:
+            returncode = 1
+            stderr = "Sign in to confirm you're not a bot. https://youtube.com/watch?v=secret"
+            stdout = ""
+        return Result()
+
+    monkeypatch.setattr(ingestion.subprocess, "run", fake_run)
+    with pytest.raises(ingestion.SourceAccessRequired, match="requires sign-in or additional verification"):
+        download_social_video("https://youtube.com/shorts/abc123", tmp_path / "source.media.part", 1024)
+
+
+def test_social_extraction_maps_transient_platform_errors(monkeypatch, tmp_path):
+    def fake_run(_command, **_kwargs):
+        class Result:
+            returncode = 1
+            stderr = "HTTP Error 429: Too Many Requests"
+            stdout = ""
+        return Result()
+
+    monkeypatch.setattr(ingestion.subprocess, "run", fake_run)
+    with pytest.raises(Exception, match="temporary retrieval error"):
+        download_social_video("https://www.tiktok.com/@creator/video/123", tmp_path / "source.media.part", 1024)
+
+
+def test_social_extraction_cleans_partial_output_after_timeout(monkeypatch, tmp_path):
+    def fake_run(_command, **_kwargs):
+        (tmp_path / "source.media.mp4").write_bytes(b"partial")
+        raise ingestion.subprocess.TimeoutExpired("yt-dlp", 10)
+
+    monkeypatch.setattr(ingestion.subprocess, "run", fake_run)
+    with pytest.raises(Exception, match="15-minute time limit"):
+        download_social_video("https://youtube.com/shorts/abc123", tmp_path / "source.media.part", 1024)
+    assert not (tmp_path / "source.media.mp4").exists()
