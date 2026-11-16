@@ -25,6 +25,7 @@ def test_job_state_and_artifact_survive_store_reinitialization(tmp_path: Path):
         "metrics": {"progress": 100, "stage": "Clips ready"},
         "failure_reason": None,
         "download_url": "/download/job-1",
+        "attempt_count": 1,
     }
     assert restarted.artifact("job-1") == artifact
 
