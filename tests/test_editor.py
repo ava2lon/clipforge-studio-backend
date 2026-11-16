@@ -31,6 +31,15 @@ def _fixture_job(tmp_path, monkeypatch):
     }
     (job_dir / "clipforge_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     monkeypatch.setattr(jobs, "get_job", lambda value: {"state": "COMPLETED"} if value == job_id else None)
+
+    class FakeStore:
+        def touch(self, value):
+            assert value == job_id
+
+        def count_active(self):
+            return 0
+
+    monkeypatch.setattr(jobs, "_STORE", FakeStore())
     return job_id, job_dir
 
 
@@ -134,3 +143,26 @@ def test_interrupted_editor_render_is_requeued_when_source_survives(tmp_path, mo
     recovered = jobs.get_clip_edit(job_id, state["edit_id"], tmp_path)
     assert recovered["state"] == "QUEUED"
     assert submitted == [("_run_clip_edit", (job_id, state["edit_id"], job_dir))]
+
+
+def test_interrupted_editor_render_respects_global_queue_capacity(tmp_path, monkeypatch):
+    job_id, job_dir = _fixture_job(tmp_path, monkeypatch)
+    state = jobs.create_clip_edit(job_id, "clip-01.mp4", tmp_path, _settings())
+    state["state"] = "RUNNING"
+    jobs._write_edit_state(jobs._edit_state_path(job_dir, state["edit_id"]), state)
+
+    class FullQueueStore:
+        def count_active(self):
+            return 3
+
+        def touch(self, value):
+            assert value == job_id
+
+    monkeypatch.setattr(jobs, "_STORE", FullQueueStore())
+    monkeypatch.setattr(jobs, "_MAX_ACTIVE_JOBS", 3)
+    monkeypatch.setattr(jobs, "_WORKDIR", tmp_path)
+    jobs._resume_interrupted_edits()
+
+    recovered = jobs.get_clip_edit(job_id, state["edit_id"], tmp_path)
+    assert recovered["state"] == "FAILED"
+    assert "queue is full" in recovered["failure_reason"]
