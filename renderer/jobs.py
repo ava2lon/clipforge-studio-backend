@@ -326,6 +326,22 @@ def get_clip_edit(job_id: str, edit_id: str, workdir: Path) -> dict[str, Any] | 
         return None
 
 
+def list_clip_edits(job_id: str, workdir: Path) -> list[dict[str, Any]]:
+    job_dir = (workdir / job_id).resolve()
+    job_dir.relative_to(workdir.resolve())
+    edits_root = job_dir / "edits"
+    if not edits_root.is_dir():
+        return []
+    edits = []
+    for path in edits_root.glob("*/edit.json"):
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+            edits.append(state)
+        except (OSError, ValueError):
+            continue
+    return sorted(edits, key=lambda item: float(item.get("created_at", 0)), reverse=True)
+
+
 def render_clip_edit(job_id: str, edit_id: str, workdir: Path) -> dict[str, Any]:
     job_dir = (workdir / job_id).resolve()
     job_dir.relative_to(workdir.resolve())
@@ -449,6 +465,8 @@ def _run_clip_edit(job_id: str, edit_id: str, job_dir: Path) -> None:
         state["updated_at"] = time.time()
         _write_edit_state(state_path, state)
     except Exception as exc:
+        for temporary_name in ("trimmed-source.mp4", "cleaned-source.mp4"):
+            (state_path.parent / temporary_name).unlink(missing_ok=True)
         try:
             state = json.loads(state_path.read_text(encoding="utf-8"))
             state["state"] = "FAILED"
