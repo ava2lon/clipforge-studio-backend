@@ -36,6 +36,34 @@ _RENDER_LOCK = threading.RLock()
 _EDIT_LOCK = threading.RLock()
 
 
+def runtime_metrics() -> dict[str, Any]:
+    disk = shutil.disk_usage(_WORKDIR)
+    active_edits = 0
+    for state_path in _WORKDIR.glob("*/edits/*/edit.json"):
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            active_edits += state.get("state") in {"QUEUED", "RUNNING"}
+        except (OSError, ValueError):
+            continue
+    return {
+        "jobs_by_state": _STORE.counts_by_state(),
+        "queue": {
+            "active_jobs": _STORE.count_active(),
+            "active_edit_renders": active_edits,
+            "max_active_jobs": _MAX_ACTIVE_JOBS,
+            "worker_count": _MAX_WORKERS,
+        },
+        "storage": {
+            "total_bytes": disk.total,
+            "used_bytes": disk.used,
+            "free_bytes": disk.free,
+            "retention_seconds": _RETENTION_SECONDS,
+            "cleanup_interval_seconds": _CLEANUP_INTERVAL_SECONDS,
+        },
+        "timestamp": time.time(),
+    }
+
+
 def get_job(job_id: str) -> dict[str, Any] | None:
     return _STORE.get(job_id)
 
