@@ -82,7 +82,21 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${STUDIO_API_KEY}" ]; then
-            echo "::warning::AVA2LON_STUDIO_API_KEY is not available to this workflow; runtime metrics smoke check skipped."
+            status="$(curl --silent --show-error --output /tmp/metrics.json --write-out '%{http_code}' --max-time 30 \
+              "https://ava2lon-studio.hf.space/metrics")"
+            if [ "${status}" != "401" ]; then
+              echo "Unauthenticated metrics request should return HTTP 401, received ${status}."
+              cat /tmp/metrics.json
+              exit 1
+            fi
+            python - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path("/tmp/metrics.json").read_text())
+          assert data.get("detail") == "Unauthorized", data
+          print("Metrics endpoint correctly rejects unauthenticated requests.")
+          PY
             exit 0
           fi
           status="$(curl --silent --show-error --output /tmp/metrics.json --write-out '%{http_code}' --max-time 30 \
