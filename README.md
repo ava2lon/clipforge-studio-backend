@@ -1,3 +1,13 @@
+---
+title: ClipForge Studio Backend
+emoji: 🎬
+colorFrom: blue
+colorTo: purple
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # ClipForge Studio Backend
 
 Docker-based video processing API for the ClipForge frontend. This repository is the source of truth; it is not mirrored from the previously empty Hugging Face Space.
