@@ -36,7 +36,7 @@ def test_submit_process_status_and_download_complete_lifecycle(tmp_path, monkeyp
             ],
         }
 
-    def fake_analyze(_source, output_dir, _media, progress=lambda *_: None):
+    def fake_analyze(_source, output_dir, _media, progress=lambda *_: None, **_options):
         clip = output_dir / "clip-01.mp4"
         clip.write_bytes(b"synthetic-rendered-clip")
         progress(90, "Rendered test clip")
