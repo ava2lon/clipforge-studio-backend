@@ -109,3 +109,21 @@ def test_counts_by_state_reports_aggregate_job_counts(tmp_path: Path):
     store.update("job-a", state="COMPLETED")
     store.update("job-b", state="FAILED")
     assert store.counts_by_state() == {"COMPLETED": 1, "FAILED": 1, "PENDING": 1}
+
+
+def test_touch_refreshes_retention_for_recent_editor_activity(tmp_path: Path):
+    database = tmp_path / "clipforge.sqlite3"
+    workdir = tmp_path / "jobs"
+    job_dir = workdir / "job-edit"
+    job_dir.mkdir(parents=True)
+    store = JobStore(database)
+    store.create("job-edit", "/download/job-edit", max_active=2)
+    store.update("job-edit", state="COMPLETED")
+    with closing(store._connect()) as conn, conn:
+        conn.execute(
+            "UPDATE jobs SET updated_at=datetime('now', '-8 days') WHERE job_id='job-edit'"
+        )
+
+    store.touch("job-edit")
+    assert store.cleanup_expired(workdir, 7 * 24 * 60 * 60) == 0
+    assert store.get("job-edit")["state"] == "COMPLETED"
