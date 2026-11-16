@@ -92,3 +92,20 @@ def test_submit_process_status_and_download_complete_lifecycle(tmp_path, monkeyp
         assert manifest["job_id"] == job_id
         assert manifest["clips"][0]["name"] == "clip-01.mp4"
         assert archive.read("clip-01.mp4") == b"synthetic-rendered-clip"
+
+    # Simulate a fresh application process by reopening the same SQLite database.
+    # The persisted artifact path must still resolve and remain downloadable.
+    monkeypatch.setattr(jobs, "_STORE", JobStore(tmp_path / "jobs.sqlite3"))
+    restarted_status = client.get(
+        f"/status/{job_id}", headers={"X-API-Key": "integration-secret"}
+    )
+    assert restarted_status.status_code == 200
+    assert restarted_status.json()["state"] == "COMPLETED"
+
+    restarted_download = client.get(
+        f"/download/{job_id}", headers={"X-API-Key": "integration-secret"}
+    )
+    assert restarted_download.status_code == 200
+    with zipfile.ZipFile(archive_path) as archive:
+        assert archive.testzip() is None
+        assert archive.read("clip-01.mp4") == b"synthetic-rendered-clip"
