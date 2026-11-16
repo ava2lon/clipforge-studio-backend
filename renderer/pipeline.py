@@ -409,6 +409,7 @@ def analyze_and_extract(source: Path, output_dir: Path, media: dict[str, Any],
         raw_path.unlink(missing_ok=True)
         results.append({**candidate, "name": name, "path": str(path),
                         "scene_detection": "PySceneDetect",
+                        "reframing": "face-aware" if focus_keyframes else "center-fallback",
                         "silence_analysis": "Auto-Editor" if active_ranges else "no_ranges_or_unavailable"})
         progress(72 + int(18 * index / len(candidates)), f"Rendering clip {index}/{len(candidates)} with FFmpeg")
     return results
