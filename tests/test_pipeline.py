@@ -76,3 +76,18 @@ def test_rank_candidates_prompt_with_no_matches_returns_empty():
         for i in range(30)
     ]
     assert _rank_candidates(segments, [], 120.0, prompt="astronaut cooking") == []
+
+
+
+def test_aspect_dimensions_supports_social_formats():
+    from renderer.pipeline import _aspect_dimensions
+    assert _aspect_dimensions("9:16") == (1080, 1920)
+    assert _aspect_dimensions("1:1") == (1080, 1080)
+    assert _aspect_dimensions("16:9") == (1920, 1080)
+
+
+def test_aspect_dimensions_rejects_unsupported_format():
+    import pytest
+    from renderer.pipeline import PipelineError, _aspect_dimensions
+    with pytest.raises(PipelineError):
+        _aspect_dimensions("4:5")
