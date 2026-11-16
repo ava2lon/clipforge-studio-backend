@@ -72,6 +72,48 @@ def job_artifact(job_id: str) -> Path | None:
     return _STORE.artifact(job_id)
 
 
+def retry_job(job_id: str) -> dict[str, Any]:
+    if not re.fullmatch(r"[a-f0-9]{32}", job_id):
+        raise ValueError("Invalid job ID")
+    job = _STORE.get(job_id)
+    if not job:
+        raise KeyError(f"Unknown job: {job_id}")
+    job_dir = (_WORKDIR / job_id).resolve()
+    job_dir.relative_to(_WORKDIR)
+    source = job_dir / "source.media"
+    if not source.is_file() or source.stat().st_size == 0:
+        raise ValueError("A complete staged source is unavailable; resubmit the original URL")
+    options_path = job_dir / "clipforge-options.json"
+    if options_path.is_file():
+        try:
+            options = json.loads(options_path.read_text(encoding="utf-8"))
+            for asset in options.get("broll_assets", []):
+                filename = asset.get("filename")
+                if not isinstance(filename, str) or not re.fullmatch(r"asset-[0-9]{2}\.mp4", filename):
+                    raise ValueError("Saved B-roll metadata is invalid; resubmit the job")
+                staged = (job_dir / "broll" / filename).resolve()
+                staged.relative_to(job_dir)
+                if not staged.is_file() or staged.stat().st_size == 0:
+                    raise ValueError("A B-roll asset was not fully staged; resubmit the job")
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError("Saved job options are unavailable; resubmit the job") from exc
+    active_edits = 0
+    for state_path in _WORKDIR.glob("*/edits/*/edit.json"):
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            active_edits += state.get("state") in {"QUEUED", "RUNNING"}
+        except (OSError, ValueError):
+            continue
+    attempt = _STORE.retry_failed(job_id, max(0, _MAX_ACTIVE_JOBS - active_edits), max_attempts=3)
+    try:
+        _EXECUTOR.submit(_run_job, job_id, None, job_dir, True)
+    except Exception as exc:
+        _STORE.update(job_id, state="FAILED", failure_reason="Retry worker submission failed",
+                      metrics={"progress": 100, "stage": "Retry worker unavailable"})
+        raise RuntimeError("Studio retry worker is unavailable") from exc
+    return {"job_id": job_id, "state": "PENDING", "attempt_count": attempt}
+
+
 def create_job(url: str, workdir: Path, clip_prompt: str | None = None, aspect_ratio: str = "9:16",
                caption_style: str = "karaoke", caption_position: str = "bottom", audio_cleanup: bool = True,
                transition: str = "none", transition_duration: float = 0.5,
