@@ -65,3 +65,80 @@ def test_social_links_require_authorized_provider_access(url):
 
 def test_direct_video_is_supported():
     assert ensure_supported_ingestion_source("https://cdn.example/video.mp4") == "direct_http_video"
+
+
+class _FakeResponse:
+    status = 200
+
+    def __init__(self, chunks, headers=None):
+        self._chunks = iter(chunks)
+        self._headers = headers or {"Content-Type": "video/mp4"}
+
+    def getheader(self, name):
+        return self._headers.get(name)
+
+    def read(self, _size=-1):
+        return next(self._chunks, b"")
+
+
+class _FakeConnection:
+    def __init__(self, _host, _addresses, response):
+        self.response = response
+
+    def request(self, *_args, **_kwargs):
+        pass
+
+    def getresponse(self):
+        return self.response
+
+    def close(self):
+        pass
+
+
+def test_direct_mp4_download_streams_and_checks_signature(monkeypatch, tmp_path):
+    payload = b"\\x00\\x00\\x00\\x18ftypmp42" + b"video-data"
+    response = _FakeResponse([payload[:5], payload[5:]])
+    monkeypatch.setattr(
+        ingestion, "_validated_https_target",
+        lambda _url: ("cdn.example", 443, "/clip.mp4", ["8.8.8.8"]),
+    )
+    monkeypatch.setattr(
+        ingestion, "_PinnedHTTPSConnection",
+        lambda host, addresses: _FakeConnection(host, addresses, response),
+    )
+    target = tmp_path / "source.part"
+    ingestion.download_direct_mp4("https://cdn.example/clip.mp4", target, 1024)
+    assert target.read_bytes() == payload
+
+
+def test_direct_mp4_download_rejects_non_mp4_and_cleans_partial(monkeypatch, tmp_path):
+    response = _FakeResponse([b"not-a-video-file"])
+    monkeypatch.setattr(
+        ingestion, "_validated_https_target",
+        lambda _url: ("cdn.example", 443, "/clip.mp4", ["8.8.8.8"]),
+    )
+    monkeypatch.setattr(
+        ingestion, "_PinnedHTTPSConnection",
+        lambda host, addresses: _FakeConnection(host, addresses, response),
+    )
+    target = tmp_path / "source.part"
+    with pytest.raises(Exception, match="not an MP4"):
+        ingestion.download_direct_mp4("https://cdn.example/clip.mp4", target, 1024)
+    assert not target.exists()
+
+
+def test_direct_mp4_download_enforces_streaming_byte_limit(monkeypatch, tmp_path):
+    payload = b"\\x00\\x00\\x00\\x18ftypmp42" + b"x" * 40
+    response = _FakeResponse([payload])
+    monkeypatch.setattr(
+        ingestion, "_validated_https_target",
+        lambda _url: ("cdn.example", 443, "/clip.mp4", ["8.8.8.8"]),
+    )
+    monkeypatch.setattr(
+        ingestion, "_PinnedHTTPSConnection",
+        lambda host, addresses: _FakeConnection(host, addresses, response),
+    )
+    target = tmp_path / "source.part"
+    with pytest.raises(Exception, match="maximum source size"):
+        ingestion.download_direct_mp4("https://cdn.example/clip.mp4", target, 20)
+    assert not target.exists()
