@@ -113,3 +113,51 @@ def test_focus_keyframes_empty_input_uses_center_fallback():
     from renderer.pipeline import _smooth_focus_keyframes
 
     assert _smooth_focus_keyframes([]) == []
+
+
+
+def test_clean_audio_builds_safe_ffmpeg_filter_chain(monkeypatch, tmp_path):
+    import subprocess
+    from renderer.pipeline import _clean_audio
+
+    source = tmp_path / "raw.mp4"
+    output = tmp_path / "clean.mp4"
+    source.write_bytes(b"source")
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        Path(command[-1]).write_bytes(b"cleaned")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    from pathlib import Path
+    monkeypatch.setattr("renderer.pipeline.shutil.which", lambda _: "/usr/bin/ffmpeg")
+    monkeypatch.setattr("renderer.pipeline.subprocess.run", fake_run)
+    assert _clean_audio(source, output) == output
+    assert output.read_bytes() == b"cleaned"
+    command = captured["command"]
+    filters = command[command.index("-af") + 1]
+    assert "highpass=f=80" in filters
+    assert "afftdn=" in filters
+    assert "loudnorm=I=-16" in filters
+    assert "-c:v" in command and "copy" in command
+    assert captured["kwargs"]["timeout"] == 900
+
+
+def test_clean_audio_removes_partial_output_on_ffmpeg_failure(monkeypatch, tmp_path):
+    import subprocess
+    import pytest
+    from renderer.pipeline import PipelineError, _clean_audio
+
+    source = tmp_path / "raw.mp4"
+    output = tmp_path / "clean.mp4"
+    source.write_bytes(b"source")
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 1, "", "filter error")
+    monkeypatch.setattr("renderer.pipeline.shutil.which", lambda _: "/usr/bin/ffmpeg")
+    monkeypatch.setattr("renderer.pipeline.subprocess.run", fake_run)
+    with pytest.raises(PipelineError, match="Audio cleanup failed"):
+        _clean_audio(source, output)
+    assert not output.exists()
+    assert not (tmp_path / "clean.part.mp4").exists()
