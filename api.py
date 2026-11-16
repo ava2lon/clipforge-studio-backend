@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -15,6 +16,7 @@ from renderer.jobs import create_job, get_job, job_artifact
 from renderer.security import is_allowed_supabase_storage_url
 
 APP_VERSION = "0.2.0"
+_JOB_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
 WORKDIR = Path(os.getenv("CLIPFORGE_WORKDIR", "/tmp/clipforge")).resolve()
 WORKDIR.mkdir(parents=True, exist_ok=True)
 app = FastAPI(title="ClipForge Studio Backend", version=APP_VERSION)
@@ -34,6 +36,11 @@ def _authorize(x_api_key: str | None) -> None:
         raise HTTPException(status_code=503, detail="Studio API key is not configured")
     if not x_api_key or not hmac.compare_digest(x_api_key, expected):
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _validate_job_id(job_id: str) -> None:
+    if not _JOB_ID_PATTERN.fullmatch(job_id):
+        raise HTTPException(status_code=400, detail="Invalid job ID")
 
 
 def _inside_workdir(candidate: Path) -> bool:
@@ -90,6 +97,7 @@ def submit_clip(request: ClipRequest, x_api_key: str | None = Header(default=Non
 @app.get("/status/{job_id}")
 def status(job_id: str, x_api_key: str | None = Header(default=None)) -> dict[str, Any]:
     _authorize(x_api_key)
+    _validate_job_id(job_id)
     job = get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -99,6 +107,7 @@ def status(job_id: str, x_api_key: str | None = Header(default=None)) -> dict[st
 @app.get("/download/{job_id}")
 def download(job_id: str, x_api_key: str | None = Header(default=None)):
     _authorize(x_api_key)
+    _validate_job_id(job_id)
     artifact = job_artifact(job_id)
     if not artifact or not artifact.is_file():
         raise HTTPException(status_code=409, detail="Job artifact is not ready")
