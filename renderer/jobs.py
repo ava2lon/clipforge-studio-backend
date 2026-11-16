@@ -255,7 +255,7 @@ def _write_edit_state(path: Path, payload: dict[str, Any]) -> None:
 
 
 def create_clip_edit(job_id: str, filename: str, workdir: Path, settings: dict[str, Any]) -> dict[str, Any]:
-    if not re.fullmatch(r"[a-f0-9]{32}", job_id) or not re.fullmatch(r"clip-[0-9]{2}\\.mp4", filename):
+    if not re.fullmatch(r"[a-f0-9]{32}", job_id) or not re.fullmatch(r"clip-[0-9]{2}\.mp4", filename):
         raise ValueError("Invalid clip reference")
     job = get_job(job_id)
     if not job or job.get("state") != "COMPLETED":
