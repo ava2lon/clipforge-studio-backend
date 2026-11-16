@@ -13,7 +13,8 @@ type Caption = { start: number; end: number; text: string };
 type CaptionStyle = "karaoke" | "bold" | "minimal";
 type CaptionPosition = "top" | "center" | "bottom";
 type FocusKeyframe = { time: number; x: number; y: number };
-type BrollOverlay = { src: string; startSeconds: number; durationSeconds: number };\ntype ClipForgeProps = {
+type BrollOverlay = { src: string; startSeconds: number; durationSeconds: number };
+type ClipForgeProps = {
   durationSeconds: number;
   captions: Caption[];
   aspectRatio: "9:16" | "1:1" | "16:9";
@@ -186,7 +187,8 @@ const ClipForgeComposition: React.FC<ClipForgeProps> = ({
         volume={fadeOpacity}
         style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition }}
       />
-      <BrollOverlayLayer overlays={brollOverlays || []} />\n      <CaptionOverlay captions={captions} style={captionStyle} position={captionPosition} />
+      <BrollOverlayLayer overlays={brollOverlays || []} />
+      <CaptionOverlay captions={captions} style={captionStyle} position={captionPosition} />
     </AbsoluteFill>
   );
 };
