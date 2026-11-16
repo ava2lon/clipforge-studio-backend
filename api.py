@@ -24,6 +24,7 @@ app = FastAPI(title="ClipForge Studio Backend", version=APP_VERSION)
 
 class ClipRequest(BaseModel):
     media: HttpUrl = Field(..., description="HTTPS Supabase Storage signed URL or public direct MP4 URL")
+    clip_prompt: str | None = Field(default=None, max_length=500, description="Optional natural-language topic or moment to find in the source video")
 
 
 class ProbeRequest(BaseModel):
@@ -92,7 +93,7 @@ def submit_clip(request: ClipRequest, x_api_key: str | None = Header(default=Non
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
-        job_id = create_job(url, WORKDIR)
+        job_id = create_job(url, WORKDIR, request.clip_prompt)
     except RuntimeError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     return {"job_id": job_id, "source_type": source_type, "status_url": f"/status/{job_id}", "download_url": f"/download/{job_id}"}
