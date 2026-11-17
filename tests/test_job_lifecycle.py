@@ -141,6 +141,8 @@ def test_client_job_id_submission_is_idempotent(tmp_path, monkeypatch):
             "start": 1.0, "end": 21.0, "duration": 20.0,
             "score": 0.8, "transcript": "Idempotency test",
             "name": clip.name, "path": str(clip),
+            "scene_detection": "PySceneDetect",
+            "silence_analysis": "Auto-Editor",
         }]
 
     monkeypatch.setattr(jobs, "_download", fake_download)
