@@ -94,6 +94,35 @@ def test_clip_submission_accepts_direct_https_mp4_url(monkeypatch):
     assert response.json()["source_type"] == "direct_http_video"
 
 
+def test_clip_submission_passes_stable_client_job_id(monkeypatch):
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    captured = {}
+
+    def fake_create_job(url, workdir, *args):
+        captured["args"] = args
+        return "f" * 32
+
+    monkeypatch.setattr("api.create_job", fake_create_job)
+    response = client.post(
+        "/clips",
+        headers={"X-API-Key": "test-secret"},
+        json={"media": "https://cdn.example.net/video.mp4", "client_job_id": "f" * 32},
+    )
+    assert response.status_code == 202
+    assert response.json()["job_id"] == "f" * 32
+    assert captured["args"][-1] == "f" * 32
+
+
+def test_clip_submission_rejects_invalid_client_job_id(monkeypatch):
+    monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
+    response = client.post(
+        "/clips",
+        headers={"X-API-Key": "test-secret"},
+        json={"media": "https://cdn.example.net/video.mp4", "client_job_id": "not-a-job-id"},
+    )
+    assert response.status_code == 422
+
+
 def test_clip_submission_rejects_direct_url_with_credentials(monkeypatch):
     monkeypatch.setenv("AVA2LON_STUDIO_API_KEY", "test-secret")
     response = client.post(
@@ -123,7 +152,7 @@ def test_clip_submission_accepts_caption_presets(monkeypatch):
         },
     )
     assert response.status_code == 202
-    assert captured["args"][-8:] == ("minimal", "top", True, "none", 0.5, None, True, [])
+    assert captured["args"][-9:] == ("minimal", "top", True, "none", 0.5, None, True, [], None)
 
 
 def test_clip_submission_rejects_unknown_caption_preset(monkeypatch):
@@ -154,7 +183,7 @@ def test_clip_submission_can_disable_audio_cleanup(monkeypatch):
     )
     assert response.status_code == 202
     assert captured["args"][4] is False
-    assert captured["args"][-5:] == ("none", 0.5, None, True, [])
+    assert captured["args"][-6:] == ("none", 0.5, None, True, [], None)
 
 
 def test_clip_submission_accepts_signed_project_broll_assets(monkeypatch):
@@ -178,7 +207,7 @@ def test_clip_submission_accepts_signed_project_broll_assets(monkeypatch):
         },
     )
     assert response.status_code == 202, response.text
-    assert captured["args"][-1] == [{
+    assert captured["args"][-2] == [{
         "url": "https://project.supabase.co/storage/v1/object/sign/source-ingestion-buffers/user/project/broll/a.mp4?token=test",
         "keywords": ["office", "team"],
     }]
