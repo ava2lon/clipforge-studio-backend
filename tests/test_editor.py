@@ -214,6 +214,9 @@ def test_new_job_admission_reserves_capacity_for_active_edit_renders(tmp_path, m
     captured = {}
 
     class AdmissionStore:
+        def get(self, job_id):
+            return None
+
         def create(self, job_id, download_url, max_active):
             captured["job_id"] = job_id
             captured["max_active"] = max_active
