@@ -115,6 +115,58 @@ def test_submit_process_status_and_download_complete_lifecycle(tmp_path, monkeyp
 
 
 
+def test_client_job_id_submission_is_idempotent(tmp_path, monkeypatch):
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    store = JobStore(tmp_path / "jobs.sqlite3")
+    monkeypatch.setattr(jobs, "_STORE", store)
+    monkeypatch.setattr(jobs, "_EXECUTOR", ImmediateExecutor())
+
+    calls = {"downloads": 0}
+
+    def fake_download(_url, target):
+        calls["downloads"] += 1
+        target.write_bytes(b"synthetic-source-media")
+
+    def fake_probe(_source):
+        return {
+            "format": {"duration": "42.0"},
+            "streams": [{"codec_type": "video", "width": 1280, "height": 720}],
+        }
+
+    def fake_analyze(_source, output_dir, _media, progress=lambda *_: None, **_options):
+        clip = output_dir / "clip-01.mp4"
+        clip.write_bytes(b"deterministic-clip")
+        return [{
+            "start": 1.0, "end": 21.0, "duration": 20.0,
+            "score": 0.8, "transcript": "Idempotency test",
+            "name": clip.name, "path": str(clip),
+        }]
+
+    monkeypatch.setattr(jobs, "_download", fake_download)
+    monkeypatch.setattr(jobs, "probe_media", fake_probe)
+    monkeypatch.setattr(jobs, "analyze_and_extract", fake_analyze)
+
+    client_job_id = "a" * 32
+    first = jobs.create_job(
+        "https://cdn.example.net/source.mp4",
+        workdir,
+        client_job_id=client_job_id,
+    )
+    second = jobs.create_job(
+        "https://cdn.example.net/source.mp4",
+        workdir,
+        client_job_id=client_job_id,
+    )
+
+    assert first == client_job_id
+    assert second == first
+    assert calls["downloads"] == 1
+    assert store.counts_by_state() == {"COMPLETED": 1}
+    options = json.loads((workdir / client_job_id / "clipforge-options.json").read_text())
+    assert options["client_job_id"] == client_job_id
+
+
 def test_source_duration_ceiling_rejects_over_quota_media_before_analysis(tmp_path, monkeypatch):
     workdir = tmp_path / "work"
     workdir.mkdir()
