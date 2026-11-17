@@ -282,9 +282,10 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
                 staged_broll.append({"path": str(target), "keywords": asset.get("keywords", []),
                                      "duration": float(asset_media.get("format", {}).get("duration", 0))})
         media = probe_media(source)
-        source_duration_seconds = float(media.get("format", {}).get("duration", 0))
-        if not math.isfinite(source_duration_seconds) or source_duration_seconds <= 0:
+        probed_duration_seconds = float(media.get("format", {}).get("duration", 0))
+        if not math.isfinite(probed_duration_seconds) or probed_duration_seconds <= 0:
             raise PipelineError("Source media has no valid finite positive duration")
+        source_duration_seconds = probed_duration_seconds
         if max_source_duration_seconds is not None:
             if not math.isfinite(max_source_duration_seconds) or max_source_duration_seconds <= 0:
                 raise PipelineError("Reserved source-duration ceiling is invalid")
