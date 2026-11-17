@@ -148,6 +148,65 @@ def test_source_duration_ceiling_rejects_over_quota_media_before_analysis(tmp_pa
 
 
 
+def test_source_duration_guard_rejects_non_finite_probe_values(tmp_path, monkeypatch):
+    import math
+
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    store = JobStore(tmp_path / "jobs.sqlite3")
+    monkeypatch.setattr(jobs, "_STORE", store)
+    monkeypatch.setattr(jobs, "_EXECUTOR", ImmediateExecutor())
+
+    def fake_download(_url, target):
+        target.write_bytes(b"synthetic-source-media")
+
+    def fake_probe(_source):
+        return {
+            "format": {"duration": "NaN"},
+            "streams": [{"codec_type": "video", "width": 1280, "height": 720}],
+        }
+
+    def analysis_must_not_run(*_args, **_kwargs):
+        raise AssertionError("analysis must not run for a non-finite source duration")
+
+    monkeypatch.setattr(jobs, "_download", fake_download)
+    monkeypatch.setattr(jobs, "probe_media", fake_probe)
+    monkeypatch.setattr(jobs, "analyze_and_extract", analysis_must_not_run)
+
+    job_id = jobs.create_job("https://cdn.example.net/source.mp4", workdir)
+    state = jobs.get_job(job_id)
+    assert state["state"] == "FAILED"
+    assert "finite positive duration" in state["failure_reason"]
+    assert "source_duration_seconds" not in state["metrics"]
+
+
+def test_source_duration_guard_rejects_non_finite_reserved_ceiling(tmp_path, monkeypatch):
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    store = JobStore(tmp_path / "jobs.sqlite3")
+    monkeypatch.setattr(jobs, "_STORE", store)
+    monkeypatch.setattr(jobs, "_EXECUTOR", ImmediateExecutor())
+
+    monkeypatch.setattr(jobs, "_download", lambda _url, target: target.write_bytes(b"source"))
+    monkeypatch.setattr(jobs, "probe_media", lambda _source: {
+        "format": {"duration": "42.0"},
+        "streams": [{"codec_type": "video", "width": 1280, "height": 720}],
+    })
+    monkeypatch.setattr(
+        jobs, "analyze_and_extract",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("analysis must not run")),
+    )
+
+    job_id = jobs.create_job(
+        "https://cdn.example.net/source.mp4",
+        workdir,
+        max_source_duration_seconds=float("inf"),
+    )
+    state = jobs.get_job(job_id)
+    assert state["state"] == "FAILED"
+    assert "Reserved source-duration ceiling is invalid" in state["failure_reason"]
+
+
 def test_retry_rejects_quota_managed_job_without_new_reservation(tmp_path, monkeypatch):
     workdir = tmp_path / "work"
     job_id = "a" * 32
