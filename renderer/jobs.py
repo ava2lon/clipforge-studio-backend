@@ -308,7 +308,7 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
         archive = job_dir / "clips.zip"
         manifest = {
             "job_id": job_id,
-            "source_duration_seconds": media["format"]["duration"],
+            "source_duration_seconds": source_duration_seconds,
             "clips": [{k: v for k, v in item.items() if k != "path"} for item in results],
             "analysis": {"transcription": "WhisperX", "scene_detection": "PySceneDetect",
                          "auto_editor_silence_analysis": all(
