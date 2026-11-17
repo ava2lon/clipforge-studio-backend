@@ -35,6 +35,8 @@ _STORE = JobStore(_DB_PATH)
 _EXECUTOR = ThreadPoolExecutor(max_workers=_MAX_WORKERS, thread_name_prefix="clipforge")
 _RENDER_LOCK = threading.RLock()
 _EDIT_LOCK = threading.RLock()
+_JOB_CREATE_LOCK = threading.RLock()
+_JOB_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
 
 
 def _count_active_edit_renders(workdir: Path) -> int:
@@ -122,44 +124,59 @@ def create_job(url: str, workdir: Path, clip_prompt: str | None = None, aspect_r
                transition: str = "none", transition_duration: float = 0.5,
                max_source_duration_seconds: float | None = None,
                quota_managed: bool = False,
-               broll_assets: list[dict[str, Any]] | None = None) -> str:
-    job_id = uuid.uuid4().hex
-    job_dir = workdir / job_id
-    job_dir.mkdir(parents=True, exist_ok=False)
-    try:
-        options_tmp = job_dir / "clipforge-options.json.part"
-        options_tmp.write_text(json.dumps({
-            "clip_prompt": (clip_prompt or "").strip()[:500],
-            "aspect_ratio": aspect_ratio,
-            "caption_style": caption_style,
-            "caption_position": caption_position,
-            "audio_cleanup": bool(audio_cleanup),
-            "transition": transition,
-            "transition_duration": transition_duration,
-            "max_source_duration_seconds": max_source_duration_seconds,
-            "quota_managed": bool(quota_managed),
-            "broll_assets": [
-                {"filename": f"asset-{index:02d}.mp4", "keywords": asset.get("keywords", [])}
-                for index, asset in enumerate(broll_assets or [], 1)
-            ],
-        }), encoding="utf-8")
-        os.replace(options_tmp, job_dir / "clipforge-options.json")
-        with _EDIT_LOCK:
-            active_edits = _count_active_edit_renders(workdir)
-            _STORE.create(job_id, f"/download/{job_id}", max(0, _MAX_ACTIVE_JOBS - active_edits))
-    except Exception:
-        import shutil
-        shutil.rmtree(job_dir, ignore_errors=True)
-        raise
-    try:
-        _EXECUTOR.submit(_run_job, job_id, url, job_dir, broll_assets=broll_assets or [],
-                         max_source_duration_seconds=max_source_duration_seconds)
-    except Exception as exc:
-        _STORE.update(job_id, state="FAILED", failure_reason="Worker submission failed",
-                      metrics={"progress": 100, "stage": "Worker unavailable"})
-        raise RuntimeError("Studio worker is unavailable") from exc
-    return job_id
+               broll_assets: list[dict[str, Any]] | None = None,
+               client_job_id: str | None = None) -> str:
+    if client_job_id is not None and not _JOB_ID_PATTERN.fullmatch(client_job_id):
+        raise ValueError("Client job ID must be 32 lowercase hexadecimal characters")
 
+    job_id = client_job_id or uuid.uuid4().hex
+    job_dir = workdir / job_id
+
+    # Serialize same-process retries so an HTTP retry with the same client ID
+    # never creates a second workspace or submits a duplicate worker.
+    with _JOB_CREATE_LOCK:
+        existing = _STORE.get(job_id)
+        if existing is not None:
+            return job_id
+
+        if job_dir.exists():
+            shutil.rmtree(job_dir, ignore_errors=True)
+        job_dir.mkdir(parents=True, exist_ok=False)
+        try:
+            options_tmp = job_dir / "clipforge-options.json.part"
+            options_tmp.write_text(json.dumps({
+                "clip_prompt": (clip_prompt or "").strip()[:500],
+                "aspect_ratio": aspect_ratio,
+                "caption_style": caption_style,
+                "caption_position": caption_position,
+                "audio_cleanup": bool(audio_cleanup),
+                "transition": transition,
+                "transition_duration": transition_duration,
+                "max_source_duration_seconds": max_source_duration_seconds,
+                "quota_managed": bool(quota_managed),
+                "client_job_id": job_id if client_job_id else None,
+                "broll_assets": [
+                    {"filename": f"asset-{index:02d}.mp4", "keywords": asset.get("keywords", [])}
+                    for index, asset in enumerate(broll_assets or [], 1)
+                ],
+            }), encoding="utf-8")
+            os.replace(options_tmp, job_dir / "clipforge-options.json")
+            with _EDIT_LOCK:
+                active_edits = _count_active_edit_renders(workdir)
+                _STORE.create(job_id, f"/download/{job_id}", max(0, _MAX_ACTIVE_JOBS - active_edits))
+        except Exception:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            raise
+
+        try:
+            _EXECUTOR.submit(_run_job, job_id, url, job_dir, broll_assets=broll_assets or [],
+                             max_source_duration_seconds=max_source_duration_seconds)
+        except Exception as exc:
+            _STORE.update(job_id, state="FAILED", failure_reason="Worker submission failed",
+                          metrics={"progress": 100, "stage": "Worker unavailable"})
+            raise RuntimeError("Studio worker is unavailable") from exc
+
+    return job_id
 
 def _set(job_id: str, **values: Any) -> None:
     _STORE.update(job_id, **values)
