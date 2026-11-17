@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -282,10 +283,13 @@ def _run_job(job_id: str, url: str | None, job_dir: Path, resume_staged: bool = 
                                      "duration": float(asset_media.get("format", {}).get("duration", 0))})
         media = probe_media(source)
         source_duration_seconds = float(media.get("format", {}).get("duration", 0))
-        if source_duration_seconds <= 0:
-            raise PipelineError("Source media has no valid positive duration")
-        if max_source_duration_seconds is not None and source_duration_seconds > max_source_duration_seconds:
-            raise PipelineError("Source duration exceeds the remaining plan allocation; upgrade your plan or use a shorter source")
+        if not math.isfinite(source_duration_seconds) or source_duration_seconds <= 0:
+            raise PipelineError("Source media has no valid finite positive duration")
+        if max_source_duration_seconds is not None:
+            if not math.isfinite(max_source_duration_seconds) or max_source_duration_seconds <= 0:
+                raise PipelineError("Reserved source-duration ceiling is invalid")
+            if source_duration_seconds > max_source_duration_seconds:
+                raise PipelineError("Source duration exceeds the remaining plan allocation; upgrade your plan or use a shorter source")
         _set(job_id, metrics={"progress": 12, "stage": "Validating media", "source_duration_seconds": source_duration_seconds})
         clips_dir = job_dir / "clips"
         import shutil
