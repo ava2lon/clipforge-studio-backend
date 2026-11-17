@@ -91,6 +91,8 @@ def test_submit_process_status_and_download_complete_lifecycle(tmp_path, monkeyp
         assert "clipforge_manifest.json" in archive.namelist()
         manifest = json.loads(archive.read("clipforge_manifest.json"))
         assert manifest["job_id"] == job_id
+        assert manifest["source_duration_seconds"] == 42.0
+        assert isinstance(manifest["source_duration_seconds"], float)
         assert manifest["clips"][0]["name"] == "clip-01.mp4"
         assert archive.read("clip-01.mp4") == b"synthetic-rendered-clip"
 
